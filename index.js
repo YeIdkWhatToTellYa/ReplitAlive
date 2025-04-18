@@ -14,15 +14,15 @@ const PASSCODE = process.env.API_PASSCODE || "CHANGE_ME";
 let lastCommand = null;
 
 // Secure endpoint
-app.get('/command/*', (req, res) => {
+app.get('/command/:command(*)', (req, res) => {
   // Authentication
   if (req.headers['x-api-key'] !== PASSCODE) {
     console.warn(`⚠️ Blocked unauthorized request from ${req.ip}`);
     return res.status(403).send("Invalid passcode!");
   }
 
-  // Extract everything after /command/
-  lastCommand = decodeURIComponent(req.params[0]);
+  // Extract command parameter
+  lastCommand = decodeURIComponent(req.params.command);
   console.log(`📩 Received: ${lastCommand}`);
   res.send(`✅ Forwarding to Roblox: ${lastCommand}`);
 });
