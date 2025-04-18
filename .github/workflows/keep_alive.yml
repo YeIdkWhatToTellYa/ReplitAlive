@@ -2,12 +2,9 @@ name: Keep Replit Alive
 on:
   schedule:
     - cron: '*/1 * * * *'  # Runs every 1 minute
-  workflow_dispatch:
-
 jobs:
   ping:
     runs-on: ubuntu-latest
     steps:
-      - name: Ping Replit
-        run: |
+      - run: |
           curl -s "https://9c6e2548-0f14-4c45-971b-0f59a49d2dcf-00-2iss3kmxunhf6.riker.replit.dev/" > /dev/null
