@@ -1,29 +1,32 @@
-
 const express = require('express');
 const app = express();
 
+// 🔐 Security - use secrets or env vars
 const PASSCODE = process.env.API_PASSCODE || "CHANGE_ME";
 let lastCommand = null;
 
-app.get('/command/:lua*?', (req, res) => {
-  // Authentication
+// ✅ FIXED: Wildcard route to capture full command after /command/
+app.get('/command/*', (req, res) => {
+  // Check x-api-key header
   if (req.headers['x-api-key'] !== PASSCODE) {
     return res.status(403).send("Invalid passcode!");
   }
 
-  const fullCommand = req.params.lua || '';
-  const additionalPath = req.params[0] || '';
-  lastCommand = decodeURIComponent(fullCommand + additionalPath);
+  // Capture everything after /command/
+  const fullCommand = req.params[0] || '';
+  lastCommand = decodeURIComponent(fullCommand);
 
   console.log(`📩 Received: ${lastCommand}`);
   res.send(`✅ Forwarding to Roblox: ${lastCommand}`);
 });
 
-
+// ⬅️ Endpoint to retrieve the last command
 app.get('/get-command', (req, res) => {
   res.json({ command: lastCommand });
 });
 
-app.listen(process.env.PORT || 3000, () => {
-  console.log("🚀 Server running at http://localhost:3000");
+// 🚀 Start the server
+const PORT = process.env.PORT || 3000;
+app.listen(PORT, () => {
+  console.log(`🚀 Server running at http://localhost:${PORT}`);
 });
