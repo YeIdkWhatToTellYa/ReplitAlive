@@ -10,4 +10,4 @@ jobs:
     steps:
       - name: Ping Replit
         run: |
-          curl -s "https://YOUR_PROJECT.YOUR_USERNAME.repl.co" > /dev/null
+          curl -s "https://9c6e2548-0f14-4c45-971b-0f59a49d2dcf-00-2iss3kmxunhf6.riker.replit.dev/" > /dev/null
