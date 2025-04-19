@@ -14,13 +14,17 @@ app.get('/', (req, res) => {
 
 async function logToDiscord(req, command) {
   try {
+    const now = new Date();
+    const utcTimestamp = now.toUTCString();
+    const isoTimestamp = now.toISOString();
+
     const embed = {
       title: "📝 New Command Received",
       color: 0x00ff00,
       fields: [
-        { name: "🕒 Timestamp", value: new Date().toISOString(), inline: true },
+        { name: "🕒 Timestamp (UTC)", value: utcTimestamp, inline: true },
         { name: "🔑 Command", value: `\`\`\`lua\n${command}\`\`\``, inline: false },
-        { name: ":satellite: IP Address", value: req.ip || req.headers['x-forwarded-for'] || "Unknown", inline: true },
+        { name: "🛰️ IP Address", value: req.ip || req.headers['x-forwarded-for'] || "Unknown", inline: true },
         { name: "🛡️ User Agent", value: req.headers['user-agent'] || "Unknown", inline: true }
       ],
       footer: { text: "Command Logger" }
