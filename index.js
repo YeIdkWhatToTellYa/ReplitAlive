@@ -5,6 +5,7 @@ const app = express();
 const PASSCODE = process.env.API_PASSCODE;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 let lastCommand = null;
+let commandConsumed = true; 
 
 app.use(express.json());
 
@@ -34,14 +35,12 @@ app.post('/command', async (req, res) => {
       return res.status(403).send("Invalid passcode!");
     }
 
-    lastCommand = {
-      value: req.body.command,
-      timestamp: Date.now()
-    };
+    lastCommand = req.body.command;
+    commandConsumed = false;
+    console.log(`📩 New command (unread): ${lastCommand}`);
     
-    console.log(`📩 New command: ${lastCommand.value}`);
-    await logToDiscord(req, lastCommand.value);
-    res.send(`✅ Command received: ${lastCommand.value}`);
+    await logToDiscord(req, lastCommand);
+    res.send(`✅ Command received: ${lastCommand}`);
     
   } catch (err) {
     console.error("Error:", err);
@@ -50,11 +49,13 @@ app.post('/command', async (req, res) => {
 });
 
 app.get('/get-command', (req, res) => {
-  const isFresh = lastCommand && (Date.now() - lastCommand.timestamp < 10000);
-  res.json({ 
-    command: isFresh ? lastCommand.value : "",
-    isFresh: isFresh
-  });
+  if (!commandConsumed && lastCommand) {
+    commandConsumed = true;
+    console.log(`📤 Sending command to client: ${lastCommand}`);
+    res.json({ command: lastCommand });
+  } else {
+    res.json({ command: "" });
+  }
 });
 
 const PORT = process.env.PORT || 3000;
