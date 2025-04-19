@@ -30,7 +30,6 @@ async function logToDiscord(req, command) {
     console.error("Failed to log to Discord:", err.message);
   }
 }
-}
 
 app.post('/command', async (req, res) => {
   try {
