@@ -14,17 +14,13 @@ app.get('/', (req, res) => {
 
 async function logToDiscord(req, command) {
   if (!WEBHOOK_URL) return;
-  
   try {
     const embed = {
       title: "📝 New Command Received",
       color: 0x00ff00,
       fields: [
-        { name: "🕒 Timestamp", value: new Date().toISOString() },
-        { name: "🔑 Command", value: `\`\`\`lua\n${command}\`\`\`` },
-        { name: "📡 IP", value: req.ip || req.headers['x-forwarded-for'] || "Unknown" }
-      ],
-      footer: { text: "Command Logger" }
+        { name: "Command", value: `\`\`\`lua\n${command}\`\`\`` }
+      ]
     };
     await axios.post(WEBHOOK_URL, { embeds: [embed] });
   } catch (err) {
@@ -35,32 +31,33 @@ async function logToDiscord(req, command) {
 app.post('/command', async (req, res) => {
   try {
     if (req.headers['x-api-key'] !== PASSCODE) {
-      console.warn("Invalid passcode attempt from:", req.ip);
       return res.status(403).send("Invalid passcode!");
     }
 
-    if (!req.body.command) {
-      return res.status(400).send("No command provided");
-    }
-
-    lastCommand = req.body.command;
-    console.log("📩 New command:", lastCommand);
-
-    await logToDiscord(req, lastCommand);
-
-    res.send(`✅ Command received: ${lastCommand}`);
+    lastCommand = {
+      value: req.body.command,
+      timestamp: Date.now()
+    };
+    
+    console.log(`📩 New command: ${lastCommand.value}`);
+    await logToDiscord(req, lastCommand.value);
+    res.send(`✅ Command received: ${lastCommand.value}`);
+    
   } catch (err) {
-    console.error("Command error:", err);
+    console.error("Error:", err);
     res.status(500).send("Server error");
   }
 });
 
 app.get('/get-command', (req, res) => {
-  res.json({ command: lastCommand || "" }); 
+  const isFresh = lastCommand && (Date.now() - lastCommand.timestamp < 10000);
+  res.json({ 
+    command: isFresh ? lastCommand.value : "",
+    isFresh: isFresh
+  });
 });
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running on port ${PORT}`);
-  console.log(`🔑 API Passcode: ${PASSCODE ? "Set" : "Warning: Not set!"}`);
+  console.log(`🚀 Server ready on port ${PORT}`);
 });
