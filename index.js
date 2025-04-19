@@ -13,19 +13,23 @@ app.get('/', (req, res) => {
 });
 
 async function logToDiscord(req, command) {
-  if (!WEBHOOK_URL) return;
   try {
     const embed = {
       title: "📝 New Command Received",
       color: 0x00ff00,
       fields: [
-        { name: "Command", value: `\`\`\`lua\n${command}\`\`\`` }
-      ]
+        { name: "🕒 Timestamp", value: new Date().toISOString(), inline: true },
+        { name: "🔑 Command", value: `\`\`\`lua\n${command}\`\`\``, inline: false },
+        { name: ":satellite: IP Address", value: req.ip || req.headers['x-forwarded-for'] || "Unknown", inline: true },
+        { name: "🛡️ User Agent", value: req.headers['user-agent'] || "Unknown", inline: true }
+      ],
+      footer: { text: "Command Logger" }
     };
     await axios.post(WEBHOOK_URL, { embeds: [embed] });
   } catch (err) {
-    console.error("Discord log failed:", err.message);
+    console.error("Failed to log to Discord:", err.message);
   }
+}
 }
 
 app.post('/command', async (req, res) => {
