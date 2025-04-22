@@ -30,50 +30,46 @@ discordClient.on('messageCreate', async message => {
 
   const args = message.content.split(' ');
   if (args.length < 2) {
-    return message.reply('Usage: `!getdata <playerId>`').then(msg => {
-      setTimeout(() => msg.delete(), 5000);
-    });
+    return message.reply('Usage: `!getdata <userId>`').then(msg => msg.delete({ timeout: 5000 }));
   }
 
-  const playerId = args[1];
-  
+  const userId = args[1];
+  if (!/^\d+$/.test(userId)) {
+    return message.reply('Invalid UserID - must be numbers only').then(msg => msg.delete({ timeout: 5000 }));
+  }
+
   try {
-    serverResponses.delete(playerId);
+    serverResponses.delete(userId);
 
     await axios.post(`${ROBLOX_SERVER_URL}/command`, {
-      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync(${playerId})`
+      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("Player_${userId}")`
     }, {
       headers: {
         'x-api-key': PASSCODE,
-        'Content-Type': 'application/json',
-        'User-Agent': 'DiscordBot/1.0'
+        'Content-Type': 'application/json'
       }
     });
 
-    await new Promise(resolve => setTimeout(resolve, 5000));
+    await new Promise(resolve => setTimeout(resolve, 8000));
 
-    const allData = serverResponses.get(playerId) || new Map();
+    const allData = serverResponses.get(userId) || new Map();
     if (allData.size === 0) {
-      return message.reply('No data found across all servers');
+      return message.reply(`No data found for Player_${userId} across all servers`);
     }
 
-    const formattedData = {};
-    allData.forEach((data, serverId) => {
-      formattedData[`Server_${serverId}`] = data;
-    });
+    const embed = {
+      title: `Player_${userId} Data`,
+      description: '```json\n' + 
+        JSON.stringify(Object.fromEntries(allData), null, 2) + 
+        '\n```',
+      color: 0x3498db,
+      footer: { text: `Fetched from ${allData.size} server(s)` }
+    };
 
-    await message.reply({
-      content: `Player data for ${playerId}:`,
-      embeds: [{
-        title: "Player Data",
-        description: '```json\n' + JSON.stringify(formattedData, null, 2) + '\n```',
-        color: 0x3498db,
-        timestamp: new Date()
-      }]
-    });
+    await message.reply({ embeds: [embed] });
 
   } catch (error) {
-    console.error('Data fetch error:', error);
+    console.error('Fetch error:', error);
   }
 });
 
