@@ -21,12 +21,15 @@ discordClient.on('ready', () => {
 });
 
 discordClient.on('messageCreate', async message => {
-  if (message.author.bot) return;
-
-  if (message.content.startsWith('!hello')) {
-    await message.reply('Hello there! I\'m your bot running alongside the Roblox command server!');
+  if (
+    message.author.bot || 
+    !message.content.startsWith('!hello') ||
+    !message.member.permissions.has('Administrator')
+  ) {
+    return;
   }
 
+  await message.reply('Executed!');
 });
 
 discordClient.login(DISCORD_BOT_TOKEN).catch(err => {
