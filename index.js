@@ -21,15 +21,11 @@ discordClient.on('ready', () => {
 });
 
 discordClient.on('messageCreate', async message => {
-  if (
-    message.author.bot || 
-    !message.content.startsWith('!hello') ||
-    !message.member.permissions.has('Administrator')
-  ) {
-    return;
-  }
+  if (message.author.bot) return;
+  if (message.content !== '!hello') return;
+  if (!message.member?.permissions.has('Administrator')) return;
 
-  await message.reply('Executed!');
+  await message.reply('Executed!').catch(console.error);
 });
 
 discordClient.login(DISCORD_BOT_TOKEN).catch(err => {
