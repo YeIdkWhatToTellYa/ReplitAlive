@@ -13,10 +13,9 @@ const serverResponses = new Map();
 
 const discordClient = new Client({
   intents: [
-    GatewayIntentBits.Guilds,
-    GatewayIntentBits.GuildMessages,
-    GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers
+    GatewayIntentBits.Guilds,           // Basic server info
+    GatewayIntentBits.GuildMessages,    // Read messages
+    GatewayIntentBits.MessageContent    // Read message content (if needed)
   ]
 });
 
