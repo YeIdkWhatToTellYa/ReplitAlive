@@ -121,18 +121,29 @@ app.post('/command', (req, res) => {
 });
 
 app.get('/get-command', (req, res) => {
-  if (req.headers['x-api-key'] !== CONFIG.PASSCODE) {
-    return res.status(403).json({ error: "Invalid API key" });
-  }
-
-  const isFresh = commandCache.lastCommand && 
-                 (Date.now() - commandCache.lastCommand.timestamp < CONFIG.COMMAND_TTL);
-  
-  res.json({
-    command: isFresh ? commandCache.lastCommand.value : null,
-    timestamp: Date.now()
-  });
-});
+    console.log("\n=== GET COMMAND REQUEST ===")
+    console.log("Headers:", req.headers)
+    
+    if (req.headers['x-api-key'] !== CONFIG.PASSCODE) {
+        console.log("Invalid API key")
+        return res.status(403).json({ 
+            status: "error",
+            message: "Invalid API key" 
+        })
+    }
+    
+    const isFresh = commandCache.lastCommand && 
+                   (Date.now() - commandCache.lastCommand.timestamp < CONFIG.COMMAND_TTL)
+    
+    const response = {
+        status: "success",
+        command: isFresh ? commandCache.lastCommand.value : null,
+        timestamp: Date.now()
+    }
+    
+    console.log("Sending response:", response)
+    res.json(response)
+})
 
 app.post('/data-response', (req, res) => {
   if (req.headers['x-api-key'] !== CONFIG.PASSCODE) {
