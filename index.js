@@ -11,7 +11,7 @@ const CONFIG = {
   SERVER_URL: process.env.ROBLOX_SERVER_URL'
 };
 
-console.log('\n=== CONFIGURATION ===');
+console.log('=== CONFIGURATION ===');
 console.log('PORT:', CONFIG.PORT);
 console.log('SERVER_URL:', CONFIG.SERVER_URL);
 console.log('API_PASSCODE:', CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET');
