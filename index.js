@@ -1,15 +1,42 @@
 const express = require('express');
 const axios = require('axios');
+const { Client, GatewayIntentBits } = require('discord.js');
 const app = express();
 
 const PASSCODE = process.env.API_PASSCODE;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
 let lastCommand = null;
+
+const discordClient = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
+
+discordClient.on('ready', () => {
+  console.log(`🤖 Discord bot logged in as ${discordClient.user.tag}`);
+});
+
+discordClient.on('messageCreate', async message => {
+  if (message.author.bot) return;
+
+  if (message.content.startsWith('!hello')) {
+    await message.reply('Hello there! I\'m your bot running alongside the Roblox command server!');
+  }
+
+});
+
+discordClient.login(DISCORD_BOT_TOKEN).catch(err => {
+  console.error('Failed to login to Discord:', err);
+});
 
 app.use(express.json());
 
 app.get('/', (req, res) => {
-  res.send('Roblox Command Server is running!');
+  res.send('Roblox Command Server and Discord Bot are running!');
 });
 
 async function logToDiscord(req, command) {
