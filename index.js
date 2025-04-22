@@ -6,9 +6,9 @@ const app = express();
 
 const CONFIG = {
   PORT: 3000,
-  API_PASSCODE: process.env.API_PASSCODE, 
+  API_PASSCODE: process.env.API_PASSCODE || 'ForTests',
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
-  SERVER_URL: process.env.ROBLOX_SERVER_URL
+  SERVER_URL: process.env.ROBLOX_SERVER_URL || 'http://localhost:3000'
 };
 
 console.log('\n=== CONFIGURATION ===');
@@ -42,29 +42,30 @@ app.get('/', (req, res) => {
     server: 'Discord-Roblox Bridge',
     endpoints: {
       command: 'POST /command',
-      data: 'POST /data-response',
-      command_get: 'GET /command'
+      data: 'POST /data-response'
     }
   });
 });
 
-app.get('/command', (req, res) => {
-  console.log('\n[GET COMMAND REQUEST]');
+app.post('/get-command', (req, res) => {
+  console.log('\n[ROBLOX CLIENT REQUEST]');
   
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
     console.warn('Invalid API key');
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
+  const { serverId, ready } = req.body;
+
   res.json({
     status: 'success',
-    command: 'return "Hello from server"',
+    command: 'return "No pending commands"',
     timestamp: Date.now()
   });
 });
 
 app.post('/command', (req, res) => {
-  console.log('\n[POST COMMAND REQUEST]');
+  console.log('\n[DISCORD BOT COMMAND]');
   
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
     console.warn('Invalid API key');
@@ -72,21 +73,21 @@ app.post('/command', (req, res) => {
   }
 
   const { command, playerId } = req.body;
-  if (!command) {
-    return res.status(400).json({ error: 'Missing command in request body' });
+  if (!command || !playerId) {
+    return res.status(400).json({ error: 'Missing command or playerId' });
   }
 
-  console.log('Received command:', command);
+  console.log(`Received command for ${playerId}:`, command);
 
   res.json({
     status: 'success',
-    command: command,
+    message: 'Command received and queued',
     timestamp: Date.now()
   });
 });
 
 app.post('/data-response', express.json(), (req, res) => {
-  console.log('\n[DATA RECEIVED]');
+  console.log('\n[DATA FROM ROBLOX]');
   console.log('Body:', req.body);
 
   const { playerId, data } = req.body;
@@ -145,10 +146,6 @@ discordClient.on('messageCreate', async message => {
 
     clearTimeout(timeout);
 
-    if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
-      throw new Error('Server returned HTML error page');
-    }
-
     await message.reply(`✅ Request sent for ${playerKey}. Waiting for data...`);
 
   } catch (err) {
@@ -181,7 +178,7 @@ discordClient.login(CONFIG.DISCORD_TOKEN)
 app.listen(CONFIG.PORT, () => {
   console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
   console.log(`🔗 Available endpoints:`);
-  console.log(`- GET  ${CONFIG.SERVER_URL}/command`);
-  console.log(`- POST ${CONFIG.SERVER_URL}/command`);
-  console.log(`- POST ${CONFIG.SERVER_URL}/data-response`);
+  console.log(`- POST ${CONFIG.SERVER_URL}/command (Discord bot)`);
+  console.log(`- POST ${CONFIG.SERVER_URL}/get-command (Roblox client)`);
+  console.log(`- POST ${CONFIG.SERVER_URL}/data-response (Roblox client)`);
 });
