@@ -1,44 +1,72 @@
 const express = require('express');
+const { Client, GatewayIntentBits } = require('discord.js');
 const app = express();
-const PORT = process.env.PORT || 3000;
+const discordClient = new Client({ 
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent
+  ]
+});
 
 const CONFIG = {
-  API_PASSCODE: process.env.API_PASSCODE || 'ForTests',
-  SERVER_URL: process.env.ROBLOX_SERVER_URL || 'https://soadbrexserver.onrender.com'
+  PORT: 3000,
+  API_PASSCODE: process.env.API_PASSCODE',
+  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  SERVER_URL: process.env.ROBLOX_SERVER_URL'
 };
+
+const pendingRequests = new Map();
+
+discordClient.on('ready', () => {
+  console.log(`🤖 Bot logged in as ${discordClient.user.tag}`);
+});
+
+discordClient.on('messageCreate', async message => {
+  if (message.author.bot || !message.content.startsWith('!getdata')) return;
+
+  if (!message.member.permissions.has('ADMINISTRATOR')) {
+    return message.reply('❌ You need admin permissions.').then(m => setTimeout(() => m.delete(), 5000));
+  }
+
+  const args = message.content.split(' ');
+  if (args.length < 2) {
+    return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
+  }
+
+  const playerId = args[1].match(/\d+/)?.[0];
+  if (!playerId) {
+    return message.reply('Invalid player ID. Use numbers only.').then(m => setTimeout(() => m.delete(), 5000));
+  }
+
+  pendingRequests.set(`Player_${playerId}`, message.channel);
+
+  try {
+    await axios.post(`${CONFIG.SERVER_URL}/command`, {
+      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("Player_${playerId}")`
+    }, {
+      headers: { 'x-api-key': CONFIG.API_PASSCODE }
+    });
+
+    await message.reply(`🔍 Fetching data for Player_${playerId}...`);
+  } catch (err) {
+    console.error('Command error:', err);
+  }
+});
 
 app.use(express.json());
 
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
-  next();
-});
-
-app.get('/get-command', (req, res) => {
-  if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
-    return res.status(403).json({ error: 'Invalid API key' });
-  }
-  
-  res.json({
-    status: 'success',
-    command: null,
-    timestamp: Date.now()
-  });
-});
-
 app.post('/data-response', (req, res) => {
-  if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
-    return res.status(403).json({ error: 'Invalid API key' });
+  const { playerId, data } = req.body;
+  const channel = pendingRequests.get(playerId);
+
+  if (channel) {
+    channel.send(`📊 Data for ${playerId}:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+    pendingRequests.delete(playerId);
   }
 
-  const { playerId, data, serverId } = req.body;
-  console.log(`📥 Received data for ${playerId} from server ${serverId}`);
-  
-  res.json({ status: 'success' });
+  res.sendStatus(200);
 });
 
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server running on port ${PORT}`);
-  console.log(`🔑 API Key: ${CONFIG.API_PASSCODE}`);
-});
+discordClient.login(CONFIG.DISCORD_TOKEN);
+app.listen(CONFIG.PORT, () => console.log(`🌐 API running on port ${CONFIG.PORT}`));
