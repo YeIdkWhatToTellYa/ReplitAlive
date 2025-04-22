@@ -8,7 +8,7 @@ const CONFIG = {
   PORT: 3000,
   API_PASSCODE: process.env.API_PASSCODE,
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
-  SERVER_URL: process.env.ROBLOX_SERVER_URL'
+  SERVER_URL: process.env.ROBLOX_SERVER_URL
 };
 
 console.log('=== CONFIGURATION ===');
