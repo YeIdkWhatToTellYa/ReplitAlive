@@ -34,18 +34,17 @@ app.use((req, res, next) => {
   next();
 });
 
-app.post('/command', express.json(), (req, res) => {
-  const apiKey = req.headers['x-api-key'];
+app.get('/command', (req, res) => {
+  console.log('=== COMMAND REQUEST RECEIVED ===');
+  console.log('Headers:', req.headers);
   
-  if (!apiKey || apiKey !== CONFIG.API_PASSCODE) {
-    console.warn('Invalid API key:', apiKey);
+  if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
+    console.warn('Invalid API key');
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
-  console.log('✅ Valid command received:', req.body.command);
-  res.json({ 
-    status: 'received',
-    command: req.body.command, 
+  res.json({
+    command: 'return "Hello from server"',
     timestamp: Date.now()
   });
 });
