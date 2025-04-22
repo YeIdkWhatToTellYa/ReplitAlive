@@ -6,7 +6,7 @@ const app = express();
 const PASSCODE = process.env.API_PASSCODE;
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const DISCORD_BOT_TOKEN = process.env.DISCORD_BOT_TOKEN;
-const ROBLOX_SERVER_URL = process.env.ROBLOX_SERVER_URL || "https://soadbrexserver.onrender.com";
+const ROBLOX_SERVER_URL = process.env.ROBLOX_SERVER_URL;
 
 let lastCommand = null;
 const serverResponses = new Map();
