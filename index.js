@@ -6,7 +6,7 @@ const app = express();
 const CONFIG = {
   PORT: process.env.PORT || 3000,
   API_PASSCODE: process.env.API_PASSCODE || 'ForTests',
-  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SERVER_URL: process.env.ROBLOX_SERVER_URL || 'http://localhost:3000'
 };
 
