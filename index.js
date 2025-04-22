@@ -1,6 +1,15 @@
 const express = require('express');
 const { Client, GatewayIntentBits } = require('discord.js');
+const axios = require('axios');
 const app = express();
+
+const CONFIG = {
+  PORT: 3000,
+  API_PASSCODE: process.env.API_PASSCODE,
+  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
+  SERVER_URL: process.env.ROBLOX_SERVER_URL
+};
+
 const discordClient = new Client({ 
   intents: [
     GatewayIntentBits.Guilds,
@@ -8,13 +17,6 @@ const discordClient = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
-
-const CONFIG = {
-  PORT: 3000,
-  API_PASSCODE: process.env.API_PASSCODE',
-  DISCORD_TOKEN: process.env.DISCORD_TOKEN,
-  SERVER_URL: process.env.ROBLOX_SERVER_URL'
-};
 
 const pendingRequests = new Map();
 
@@ -25,23 +27,19 @@ discordClient.on('ready', () => {
 discordClient.on('messageCreate', async message => {
   if (message.author.bot || !message.content.startsWith('!getdata')) return;
 
-  if (!message.member.permissions.has('ADMINISTRATOR')) {
-    return message.reply('❌ You need admin permissions.').then(m => setTimeout(() => m.delete(), 5000));
-  }
-
-  const args = message.content.split(' ');
-  if (args.length < 2) {
-    return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
-  }
-
-  const playerId = args[1].match(/\d+/)?.[0];
-  if (!playerId) {
-    return message.reply('Invalid player ID. Use numbers only.').then(m => setTimeout(() => m.delete(), 5000));
-  }
-
-  pendingRequests.set(`Player_${playerId}`, message.channel);
-
   try {
+    const member = await message.guild.members.fetch(message.author.id);
+    if (!member.permissions.has('ADMINISTRATOR')) {
+      return message.reply('❌ You need admin permissions.').then(m => setTimeout(() => m.delete(), 5000));
+    }
+
+    const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
+    if (!playerId) {
+      return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
+    }
+
+    pendingRequests.set(`Player_${playerId}`, message.channel);
+
     await axios.post(`${CONFIG.SERVER_URL}/command`, {
       command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("Player_${playerId}")`
     }, {
@@ -68,5 +66,8 @@ app.post('/data-response', (req, res) => {
   res.sendStatus(200);
 });
 
-discordClient.login(CONFIG.DISCORD_TOKEN);
-app.listen(CONFIG.PORT, () => console.log(`🌐 API running on port ${CONFIG.PORT}`));
+discordClient.login(CONFIG.DISCORD_TOKEN).catch(console.error);
+app.listen(CONFIG.PORT, () => {
+  console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
+  console.log(`🔑 API Key: ${CONFIG.API_PASSCODE ? 'SET' : 'NOT SET'}`);
+});
