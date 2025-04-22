@@ -86,30 +86,44 @@ discordClient.on('messageCreate', async message => {
     const playerKey = `Player_${playerId}`;
     pendingRequests.set(playerKey, message.channel);
 
-    setTimeout(() => {
-      if (pendingRequests.has(playerKey)) {
-        pendingRequests.delete(playerKey);
-        message.channel.send(`⌛ Timeout fetching data for ${playerKey}`);
-      }
-    }, REQUEST_TIMEOUT);
-
-    console.log(`Sending command for ${playerKey}`);
     const response = await axios.post(`${CONFIG.SERVER_URL}/command`, {
       command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`
     }, {
       headers: { 
         'x-api-key': CONFIG.API_PASSCODE,
-        'Content-Type': 'application/json'
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
       },
-      timeout: 10000
+      timeout: 10000,
+      transformResponse: [data => data]
     });
 
-    console.log('Command response:', response.data);
+    if (response.data.startsWith('<!DOCTYPE html>')) {
+      throw new Error('Server returned HTML error page');
+    }
+
+    const responseData = typeof response.data === 'string' 
+      ? JSON.parse(response.data) 
+      : response.data;
+
+    console.log('Command response:', responseData);
     await message.reply(`🔍 Fetching data for ${playerKey}...`);
 
   } catch (err) {
-    console.error('Command error:', err.response?.data || err.message);
-    message.reply('⚠️ Failed to process request. Check server logs.').then(m => setTimeout(() => m.delete(), 5000));
+    console.error('Full error:', err);
+    let errorMessage = '⚠️ Failed to process request';
+    
+    if (err.response) {
+      errorMessage += `\nStatus: ${err.response.status}`;
+      if (err.response.data) {
+        errorMessage += `\nResponse: ${err.response.data.substring(0, 100)}...`;
+      }
+    } else {
+      errorMessage += `\nError: ${err.message}`;
+    }
+    
+    message.reply(errorMessage).then(m => setTimeout(() => m.delete(), 10000));
+    pendingRequests.delete(`Player_${playerId}`);
   }
 });
 
