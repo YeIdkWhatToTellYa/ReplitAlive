@@ -4,14 +4,17 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const axios = require('axios');
 const app = express();
 
+// ======================
+// CONFIGURATION
+// ======================
 const CONFIG = {
   PORT: 3000,
-  API_PASSCODE: process.env.API_PASSCODE,
+  API_PASSCODE: process.env.API_PASSCODE',
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SERVER_URL: process.env.ROBLOX_SERVER_URL
 };
 
-console.log('=== CONFIGURATION ===');
+console.log('\n=== CONFIGURATION ===');
 console.log('PORT:', CONFIG.PORT);
 console.log('SERVER_URL:', CONFIG.SERVER_URL);
 console.log('API_PASSCODE:', CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET');
@@ -26,12 +29,13 @@ const discordClient = new Client({
 });
 
 const pendingRequests = new Map();
-const REQUEST_TIMEOUT = 30000; 
+const REQUEST_TIMEOUT = 30000;
 
 app.use(express.json());
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   next();
 });
 
@@ -45,13 +49,20 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/command', (req, res) => {
+app.post('/command', (req, res) => {
   console.log('\n[COMMAND REQUEST]');
   
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
     console.warn('Invalid API key');
     return res.status(403).json({ error: 'Invalid API key' });
   }
+
+  const { command } = req.body;
+  if (!command) {
+    return res.status(400).json({ error: 'Missing command in request body' });
+  }
+
+  console.log('Received command:', command);
 
   res.json({
     status: 'success',
@@ -78,6 +89,9 @@ app.post('/data-response', express.json(), (req, res) => {
   res.json({ status: 'success' });
 });
 
+// ======================
+// DISCORD BOT LOGIC
+// ======================
 discordClient.on('ready', () => {
   console.log(`\n🤖 Bot logged in as ${discordClient.user.tag}`);
 });
@@ -87,12 +101,12 @@ discordClient.on('messageCreate', async message => {
 
   try {
     if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      return message.reply('❌ Admin only').then(m => m.delete({ timeout: 5000 }));
+      return message.reply('❌ Admin only').then(m => setTimeout(() => m.delete(), 5000));
     }
 
     const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
     if (!playerId) {
-      return message.reply('Usage: `!getdata <playerId>`').then(m => m.delete({ timeout: 5000 }));
+      return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
     }
 
     const playerKey = `Player_${playerId}`;
@@ -119,7 +133,6 @@ discordClient.on('messageCreate', async message => {
 
     clearTimeout(timeout);
 
-    // Verify response isn't an HTML error page
     if (typeof response.data === 'string' && response.data.includes('<!DOCTYPE html>')) {
       throw new Error('Server returned HTML error page');
     }
@@ -139,10 +152,13 @@ discordClient.on('messageCreate', async message => {
       errorMsg += err.message;
     }
 
-    message.reply(errorMsg).then(m => m.delete({ timeout: 10000 }));
+    message.reply(errorMsg).then(m => setTimeout(() => m.delete(), 10000));
   }
 });
 
+// ======================
+// START SERVICES
+// ======================
 discordClient.login(CONFIG.DISCORD_TOKEN)
   .then(() => console.log('🤖 Bot login successful'))
   .catch(err => {
@@ -156,6 +172,6 @@ discordClient.login(CONFIG.DISCORD_TOKEN)
 app.listen(CONFIG.PORT, () => {
   console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
   console.log(`🔗 Available endpoints:`);
-  console.log(`- GET  ${CONFIG.SERVER_URL}/command`);
+  console.log(`- POST ${CONFIG.SERVER_URL}/command`);
   console.log(`- POST ${CONFIG.SERVER_URL}/data-response`);
 });
