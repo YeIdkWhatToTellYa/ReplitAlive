@@ -3,6 +3,7 @@ const { Client, GatewayIntentBits } = require('discord.js');
 const axios = require('axios');
 const app = express();
 
+// Configuration
 const CONFIG = {
   PORT: 3000,
   API_PASSCODE: process.env.API_PASSCODE,
@@ -10,6 +11,7 @@ const CONFIG = {
   SERVER_URL: process.env.ROBLOX_SERVER_URL
 };
 
+// Initialize Discord bot
 const discordClient = new Client({ 
   intents: [
     GatewayIntentBits.Guilds,
@@ -18,7 +20,47 @@ const discordClient = new Client({
   ]
 });
 
+// Data storage
 const pendingRequests = new Map();
+
+// ======================
+// EXPRESS ENDPOINTS
+// ======================
+
+// Add this endpoint to handle Roblox commands
+app.post('/command', express.json(), (req, res) => {
+  if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
+    return res.status(403).json({ error: 'Invalid API key' });
+  }
+
+  console.log('Received command:', req.body.command);
+  res.json({ 
+    status: 'received',
+    timestamp: Date.now()
+  });
+});
+
+// Data receiver endpoint
+app.post('/data-response', express.json(), (req, res) => {
+  const { playerId, data } = req.body;
+  const channel = pendingRequests.get(playerId);
+  
+  if (channel) {
+    channel.send(`📊 Data for ${playerId}:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+    pendingRequests.delete(playerId);
+  }
+  
+  res.sendStatus(200);
+});
+
+// Health check
+app.get('/health', (req, res) => {
+  res.json({ status: 'online' });
+});
+
+// ======================
+// DISCORD BOT
+// ======================
 
 discordClient.on('ready', () => {
   console.log(`🤖 Bot logged in as ${discordClient.user.tag}`);
@@ -49,25 +91,17 @@ discordClient.on('messageCreate', async message => {
     await message.reply(`🔍 Fetching data for Player_${playerId}...`);
   } catch (err) {
     console.error('Command error:', err);
+    message.reply('⚠️ Failed to process request').then(m => setTimeout(() => m.delete(), 5000));
   }
 });
 
-app.use(express.json());
-
-app.post('/data-response', (req, res) => {
-  const { playerId, data } = req.body;
-  const channel = pendingRequests.get(playerId);
-
-  if (channel) {
-    channel.send(`📊 Data for ${playerId}:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
-    pendingRequests.delete(playerId);
-  }
-
-  res.sendStatus(200);
-});
-
+// Start services
 discordClient.login(CONFIG.DISCORD_TOKEN).catch(console.error);
 app.listen(CONFIG.PORT, () => {
   console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
   console.log(`🔑 API Key: ${CONFIG.API_PASSCODE ? 'SET' : 'NOT SET'}`);
+  console.log(`📡 Available endpoints:`);
+  console.log(`- POST /command`);
+  console.log(`- POST /data-response`);
+  console.log(`- GET  /health`);
 });
