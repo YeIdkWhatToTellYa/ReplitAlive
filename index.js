@@ -104,8 +104,8 @@ app.post('/discord-command', (req, res) => {
 
 
 app.post('/data-response', express.json(), (req, res) => {
-  console.log('\n[DATA FROM ROBLOX] Received:', JSON.stringify(req.body, null, 2));
-  
+  console.log('\n[DATA FROM ROBLOX] Raw:', JSON.stringify(req.body, null, 2));
+
   try {
     const { playerId, data, success, error, metadata } = req.body;
     if (!playerId) return res.status(400).json({ error: 'Missing playerId' });
@@ -114,47 +114,41 @@ app.post('/data-response', express.json(), (req, res) => {
     if (!channel) return res.status(200).json({ status: 'no pending request' });
 
     const formatValue = (value) => {
-      if (typeof value === 'boolean') return value ? '✅ true' : '❌ false';
-      if (value === null) return '∅ null';
-      if (value === undefined) return 'undefined';
+      if (typeof value === 'boolean') return value ? '✅' : '❌';
+      if (Array.isArray(value)) return value.join(', ');
+      if (value === null) return '∅';
+      if (value === undefined) return '─';
       if (typeof value === 'object') {
-        try {
-          return JSON.stringify(value, null, 2).replace(/{|}|"/g, '').trim();
-        } catch {
-          return '[Complex Data]';
-        }
+        const entries = Object.entries(value).map(([k,v]) => `${k}:${v}`);
+        return entries.join(', ');
       }
       return value;
     };
 
-    let formattedText = '```\n';
     const displayData = data?.data || data || {};
-    
+    const maxKeyLength = Math.max(...Object.keys(displayData).map(k => k.length), 15);
+
+    let message = `📊 **${playerId}'s Data**\n\`\`\`\n`;
     for (const [key, value] of Object.entries(displayData)) {
-      const formattedValue = formatValue(value);
-      formattedText += `${key.padEnd(25)}: ${formattedValue}\n`;
-      
-      if (formattedText.length > 1500) {
-        formattedText += '```';
-        channel.send(formattedText);
-        formattedText = '```\n';
-      }
+      message += `${key.padEnd(maxKeyLength + 2)}: ${formatValue(value)}\n`;
     }
+    message += '```';
 
     const embed = new EmbedBuilder()
-      .setColor(success === false ? 0xff0000 : 0x0099ff)
-      .setTitle(`${success === false ? '❌' : '📊'} Player Data: ${playerId}`)
+      .setColor(0x00AE86)
+      .setDescription(message)
       .setTimestamp();
 
-    if (metadata?.serverId) embed.addFields({ name: 'Server', value: metadata.serverId, inline: true });
-    if (metadata?.placeId) embed.addFields({ name: 'Place', value: metadata.placeId.toString(), inline: true });
+    if (metadata) {
+      embed.addFields(
+        { name: 'Server', value: metadata.serverId || '─', inline: true },
+        { name: 'Place', value: metadata.placeId?.toString() || '─', inline: true }
+      );
+    }
 
     if (success === false) {
-      embed.setDescription(`**Command Failed**\n\`\`\`${error}\`\`\``);
-    } else if (formattedText === '```\n```') {
-      embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
-    } else {
-      embed.setDescription(formattedText + '```');
+      embed.setColor(0xFF0000)
+           .setDescription(`❌ **Error**\n\`\`\`${error}\`\`\``);
     }
 
     channel.send({ embeds: [embed] });
@@ -162,7 +156,7 @@ app.post('/data-response', express.json(), (req, res) => {
     res.json({ status: 'success' });
 
   } catch (err) {
-    console.error('Data processing error:', err);
+    console.error('Processing error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
