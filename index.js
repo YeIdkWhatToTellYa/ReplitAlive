@@ -288,7 +288,7 @@ discordClient.on('messageCreate', async message => {
     }, REQUEST_TIMEOUT);
 
     const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
+      command: `game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
       playerId: playerKey
     }, {
       headers: { 
