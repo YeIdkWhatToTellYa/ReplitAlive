@@ -119,36 +119,36 @@ app.post('/data-response', express.json(), (req, res) => {
 
     let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
     for (const [key, value] of Object.entries(playerData)) {
-      const formattedValue = typeof value === 'boolean' 
-        ? (value ? '✅ true' : '❌ false')
-        : value;
-      
-      const changeIndicator = typeof value === 'number' 
-        ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
-        : ' ';
-      
-      message += `${changeIndicator} ${key.padEnd(maxKeyLength)}: ${formattedValue}\n`;
+      let formattedValue;
+      if (typeof value === 'boolean') {
+        formattedValue = value 
+          ? '\u001b[32m✅ true\u001b[0m'
+          : '\u001b[31m❌ false\u001b[0m';
+      } else if (typeof value === 'number') {
+        formattedValue = value > 0 
+          ? '\u001b[32m+' + value + '\u001b[0m'
+          : '\u001b[31m' + value + '\u001b[0m';
+      } else {
+        formattedValue = value;
+      }
+
+      message += `${key.padEnd(maxKeyLength)}: ${formattedValue}\n`;
     }
     message += '```';
 
-    let timestampDisplay = 'N/A';
-    try {
-      if (metadata?.timestamp) {
-        const date = new Date(metadata.timestamp * 1000);
-        timestampDisplay = date.toISOString().replace('T', ' ').replace(/\..+/, '');
-      }
-    } catch (e) {
-      console.error('Timestamp formatting error:', e);
-    }
-
     const embed = new EmbedBuilder()
-      .setColor(success === false ? 0xFF0000 : 0x00AE86)
-      .setDescription(success === false 
-        ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
-        : message)
+      .setColor(0x00AE86)
+      .setDescription(message)
       .setFooter({ 
-        text: `Server: ${metadata?.serverId || 'N/A'} | ${timestampDisplay}` 
+        text: metadata?.serverId 
+          ? `Server: ${metadata.serverId}` 
+          : 'No server info' 
       });
+
+    if (success === false) {
+      embed.setColor(0xFF0000)
+           .setDescription(`❌ **Error**\n\`\`\`${error}\`\`\``);
+    }
 
     channel.send({ embeds: [embed] });
     pendingRequests.delete(playerId);
