@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 
 const CONFIG = {
-  PORT: 3000,
+  PORT: process.env.PORT || 3000,
   API_PASSCODE: process.env.API_PASSCODE,
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SERVER_URL: process.env.ROBLOX_SERVER_URL
@@ -30,6 +30,7 @@ const pendingRequests = new Map();
 const REQUEST_TIMEOUT = 30000;
 
 app.use(express.json());
+app.use(express.urlencoded({ extended: true }));
 app.use((req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
@@ -37,10 +38,12 @@ app.use((req, res, next) => {
   next();
 });
 
+// Health check endpoint
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
     server: 'Discord-Roblox Bridge',
+    version: '2.1.0',
     endpoints: {
       getCommand: 'GET /get-command',
       dataResponse: 'POST /data-response',
@@ -100,43 +103,63 @@ app.post('/discord-command', (req, res) => {
   });
 });
 
+
 app.post('/data-response', express.json(), (req, res) => {
   console.log('\n[DATA FROM ROBLOX]');
-  console.log('Body:', req.body);
+  
+  try {
+    const { playerId, data, success, error, metadata } = req.body;
+    if (!playerId) {
+      return res.status(400).json({ error: 'Missing playerId' });
+    }
 
-  const { playerId, data } = req.body;
-  if (!playerId) {
-    return res.status(400).json({ error: 'Missing playerId' });
-  }
+    const channel = pendingRequests.get(playerId);
+    if (!channel) {
+      return res.status(200).json({ status: 'no pending request' });
+    }
 
-  const channel = pendingRequests.get(playerId);
-  if (channel) {
     const embed = new EmbedBuilder()
-      .setColor(0x0099ff)
-      .setTitle(`📊 Player Data: ${playerId}`)
-      .setTimestamp()
-      .setFooter({ text: 'Data retrieved from Roblox' });
+      .setColor(success === false ? 0xff0000 : 0x0099ff)
+      .setTitle(`${success === false ? '❌' : '📊'} Player Data: ${playerId}`)
+      .setTimestamp();
 
-    if (typeof data === 'object' && data !== null) {
-      for (const [key, value] of Object.entries(data)) {
+    if (metadata?.serverId) {
+      embed.addFields({ name: 'Server ID', value: metadata.serverId, inline: true });
+    }
+
+    if (success === false) {
+      embed.setDescription('**Command Execution Failed**')
+           .addFields({ name: 'Error', value: `\`\`\`${error || 'Unknown error'}\`\`\`` });
+    } else if (data?.data) {
+      const displayData = data.data;
+      
+      if (typeof displayData === 'object') {
+        for (const [key, value] of Object.entries(displayData)) {
+          embed.addFields({
+            name: key,
+            value: `\`\`\`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\`\`\``.substring(0, 1024),
+            inline: key.length < 15
+          });
+        }
+      } else {
         embed.addFields({
-          name: key,
-          value: `\`\`\`json\n${JSON.stringify(value, null, 2).substring(0, 1000)}\n\`\`\``,
-          inline: true
+          name: 'Data',
+          value: `\`\`\`${displayData}\`\`\``
         });
       }
-    } else {
-      embed.addFields({
-        name: 'Response',
-        value: `\`\`\`${data}\`\`\``
-      });
     }
 
     channel.send({ embeds: [embed] });
     pendingRequests.delete(playerId);
-  }
+    res.json({ status: 'success' });
 
-  res.json({ status: 'success' });
+  } catch (err) {
+    console.error('Data processing error:', err);
+    res.status(500).json({ 
+      error: 'Internal server error',
+      details: err.message 
+    });
+  }
 });
 
 discordClient.on('ready', () => {
@@ -240,20 +263,14 @@ discordClient.on('messageCreate', async message => {
   }
 });
 
+
 discordClient.login(CONFIG.DISCORD_TOKEN)
   .then(() => console.log('🤖 Bot login successful'))
   .catch(err => {
     console.error('🔴 Discord login failed:', err.message);
-    console.log('\nℹ️ Required intents in Discord Developer Portal:');
-    console.log('- Message Content Intent (ENABLED)');
-    console.log('- Server Members Intent (DISABLED)');
     process.exit(1);
   });
 
 app.listen(CONFIG.PORT, () => {
   console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
-  console.log(`🔗 Available endpoints:`);
-  console.log(`- GET  ${CONFIG.SERVER_URL}/get-command (Roblox client)`);
-  console.log(`- POST ${CONFIG.SERVER_URL}/discord-command (Discord bot)`);
-  console.log(`- POST ${CONFIG.SERVER_URL}/data-response (Roblox client)`);
 });
