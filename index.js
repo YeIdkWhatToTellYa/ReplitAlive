@@ -117,6 +117,13 @@ app.post('/data-response', express.json(), (req, res) => {
       if (typeof value === 'boolean') return value ? '✅ true' : '❌ false';
       if (value === null) return '∅ null';
       if (value === undefined) return 'undefined';
+      if (typeof value === 'object') {
+        try {
+          return JSON.stringify(value, null, 2).replace(/{|}|"/g, '').trim();
+        } catch {
+          return '[Complex Data]';
+        }
+      }
       return value;
     };
 
@@ -124,7 +131,8 @@ app.post('/data-response', express.json(), (req, res) => {
     const displayData = data?.data || data || {};
     
     for (const [key, value] of Object.entries(displayData)) {
-      formattedText += `${key.padEnd(25)}: ${formatValue(value)}\n`;
+      const formattedValue = formatValue(value);
+      formattedText += `${key.padEnd(25)}: ${formattedValue}\n`;
       
       if (formattedText.length > 1500) {
         formattedText += '```';
@@ -143,6 +151,8 @@ app.post('/data-response', express.json(), (req, res) => {
 
     if (success === false) {
       embed.setDescription(`**Command Failed**\n\`\`\`${error}\`\`\``);
+    } else if (formattedText === '```\n```') {
+      embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
     } else {
       embed.setDescription(formattedText + '```');
     }
