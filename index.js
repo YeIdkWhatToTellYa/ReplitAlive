@@ -100,6 +100,7 @@ app.post('/discord-command', (req, res) => {
   });
 });
 
+
 app.post('/data-response', express.json(), (req, res) => {
   console.log('\n[DATA FROM ROBLOX]');
   console.log('Body:', req.body);
@@ -193,6 +194,7 @@ function shouldInline(key, value) {
   const noInlineFields = ['id', 'userId', 'playerId', 'data'];
   return !noInlineFields.includes(key.toLowerCase());
 }
+
 discordClient.login(CONFIG.DISCORD_TOKEN)
   .then(() => console.log('🤖 Bot login successful'))
   .catch(err => {
