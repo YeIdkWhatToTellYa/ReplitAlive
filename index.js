@@ -113,38 +113,28 @@ app.post('/data-response', express.json(), (req, res) => {
     const channel = pendingRequests.get(playerId);
     if (!channel) return res.status(200).json({ status: 'no pending request' });
 
-    const formatValue = (value) => {
-      if (typeof value === 'boolean') return value ? '✅' : '❌';
-      if (Array.isArray(value)) return value.join(', ');
-      if (value === null) return '∅';
-      if (value === undefined) return '─';
-      if (typeof value === 'object') {
-        const entries = Object.entries(value).map(([k,v]) => `${k}:${v}`);
-        return entries.join(', ');
-      }
-      return value;
-    };
+    const playerData = data?.result || {};
 
-    const displayData = data?.data || data || {};
-    const maxKeyLength = Math.max(...Object.keys(displayData).map(k => k.length), 15);
+    const maxKeyLength = Math.max(...Object.keys(playerData).map(k => k.length), 10);
 
-    let message = `📊 **${playerId}'s Data**\n\`\`\`\n`;
-    for (const [key, value] of Object.entries(displayData)) {
-      message += `${key.padEnd(maxKeyLength + 2)}: ${formatValue(value)}\n`;
+    let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
+    for (const [key, value] of Object.entries(playerData)) {
+      const formattedValue = typeof value === 'boolean' 
+        ? (value ? '✅ true' : '❌ false')
+        : value;
+
+      const changeIndicator = typeof value === 'number' 
+        ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
+        : ' ';
+      
+      message += `${changeIndicator} ${key.padEnd(maxKeyLength)}: ${formattedValue}\n`;
     }
     message += '```';
 
     const embed = new EmbedBuilder()
       .setColor(0x00AE86)
       .setDescription(message)
-      .setTimestamp();
-
-    if (metadata) {
-      embed.addFields(
-        { name: 'Server', value: metadata.serverId || '─', inline: true },
-        { name: 'Place', value: metadata.placeId?.toString() || '─', inline: true }
-      );
-    }
+      .setFooter({ text: `Server: ${metadata?.serverId || 'N/A'} | ${new Date(metadata?.timestamp * 1000).toLocaleString()}`);
 
     if (success === false) {
       embed.setColor(0xFF0000)
