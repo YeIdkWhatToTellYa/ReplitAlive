@@ -131,15 +131,24 @@ app.post('/data-response', express.json(), (req, res) => {
     }
     message += '```';
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00AE86)
-      .setDescription(message)
-      .setFooter({ text: `Server: ${metadata?.serverId || 'N/A'} | ${new Date(metadata?.timestamp * 1000).toLocaleString()}`);
-
-    if (success === false) {
-      embed.setColor(0xFF0000)
-           .setDescription(`❌ **Error**\n\`\`\`${error}\`\`\``);
+    let timestampDisplay = 'N/A';
+    try {
+      if (metadata?.timestamp) {
+        const date = new Date(metadata.timestamp * 1000);
+        timestampDisplay = date.toISOString().replace('T', ' ').replace(/\..+/, '');
+      }
+    } catch (e) {
+      console.error('Timestamp formatting error:', e);
     }
+
+    const embed = new EmbedBuilder()
+      .setColor(success === false ? 0xFF0000 : 0x00AE86)
+      .setDescription(success === false 
+        ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
+        : message)
+      .setFooter({ 
+        text: `Server: ${metadata?.serverId || 'N/A'} | ${timestampDisplay}` 
+      });
 
     channel.send({ embeds: [embed] });
     pendingRequests.delete(playerId);
