@@ -102,54 +102,93 @@ app.post('/discord-command', (req, res) => {
 
 app.post('/data-response', express.json(), (req, res) => {
   console.log('\n[DATA FROM ROBLOX]');
-  console.log('Body:', req.body);
-
-  const { playerId, data } = req.body;
-  if (!playerId) {
-    return res.status(400).json({ error: 'Missing playerId' });
-  }
-
-  const channel = pendingRequests.get(playerId);
-  if (channel) {
-    const embed = new EmbedBuilder()
-      .setTitle('📊 Player Data Response')
-      .setDescription(`Data received from Roblox client for player: \`${playerId}\``)
-      .setColor(0x00AE86)
-      .setTimestamp()
-      .addFields(
-        {
-          name: '🔹 Player ID',
-          value: `\`\`\`${playerId}\`\`\``,
-          inline: true
-        },
-        {
-          name: '📅 Response Time',
-          value: `<t:${Math.floor(Date.now()/1000)}:R>`,
-          inline: true
-        }
-      );
-
-    if (typeof data === 'object' && data !== null) {
-      for (const [key, value] of Object.entries(data)) {
-        embed.addFields({
-          name: `📌 ${key}`,
-          value: `\`\`\`json\n${JSON.stringify(value, null, 2).substring(0, 1000)}\`\`\``,
-          inline: false
-        });
-      }
-    } else {
-      embed.addFields({
-        name: '📌 Data',
-        value: `\`\`\`${data}\`\`\``,
-        inline: false
+  
+  try {
+    if (req.headers['content-type']?.includes('text/html')) {
+      console.error('Received HTML error page instead of JSON response');
+      return res.status(500).json({ 
+        error: 'Internal Server Error',
+        details: 'Roblox server returned an HTML error page' 
       });
     }
 
-    channel.send({ embeds: [embed] });
-    pendingRequests.delete(playerId);
-  }
+    console.log('Body:', req.body);
+    const { playerId, data } = req.body;
+    
+    if (!playerId) {
+      return res.status(400).json({ error: 'Missing playerId' });
+    }
 
-  res.json({ status: 'success' });
+    const channel = pendingRequests.get(playerId);
+    if (channel) {
+      if (typeof data === 'string' && data.includes('<html') && data.includes('Internal Server Error')) {
+        const errorEmbed = new EmbedBuilder()
+          .setTitle('⚠️ Roblox Server Error')
+          .setDescription(`Roblox server returned an error for player: \`${playerId}\``)
+          .setColor(0xFF0000)
+          .addFields(
+            {
+              name: '🔴 Error Type',
+              value: '```500 Internal Server Error```',
+              inline: true
+            },
+            {
+              name: '📅 Time',
+              value: `<t:${Math.floor(Date.now()/1000)}:R>`,
+              inline: true
+            }
+          )
+          .setFooter({ text: 'Check the Roblox server logs for more details' });
+        
+        channel.send({ embeds: [errorEmbed] });
+      } else {
+        const successEmbed = new EmbedBuilder()
+          .setTitle('📊 Player Data Response')
+          .setDescription(`Data received from Roblox client for player: \`${playerId}\``)
+          .setColor(0x00AE86)
+          .setTimestamp()
+          .addFields(
+            {
+              name: '🔹 Player ID',
+              value: `\`\`\`${playerId}\`\`\``,
+              inline: true
+            },
+            {
+              name: '📅 Response Time',
+              value: `<t:${Math.floor(Date.now()/1000)}:R>`,
+              inline: true
+            }
+          );
+
+        if (typeof data === 'object' && data !== null) {
+          for (const [key, value] of Object.entries(data)) {
+            successEmbed.addFields({
+              name: `📌 ${key}`,
+              value: `\`\`\`json\n${JSON.stringify(value, null, 2).substring(0, 1000)}\`\`\``,
+              inline: false
+            });
+          }
+        } else {
+          successEmbed.addFields({
+            name: '📌 Data',
+            value: `\`\`\`${data}\`\`\``,
+            inline: false
+          });
+        }
+
+        channel.send({ embeds: [successEmbed] });
+      }
+      pendingRequests.delete(playerId);
+    }
+
+    res.json({ status: 'success' });
+  } catch (error) {
+    console.error('Error processing data response:', error);
+    res.status(500).json({ 
+      error: 'Internal Server Error',
+      details: error.message 
+    });
+  }
 });
 
 discordClient.on('ready', () => {
@@ -193,7 +232,7 @@ discordClient.on('messageCreate', async message => {
       if (pendingRequests.has(playerKey)) {
         pendingRequests.delete(playerKey);
         const embed = new EmbedBuilder()
-          .setDescription(`⌛ **Timeout:** No response received for \`${playerKey}\``)
+          .setDescription(`⌛ **Timeout:** No response received for \`${playerKey}\` after ${REQUEST_TIMEOUT/1000} seconds`)
           .setColor(0xFFA500);
         message.channel.send({ embeds: [embed] });
       }
@@ -209,10 +248,35 @@ discordClient.on('messageCreate', async message => {
         'Accept': 'application/json'
       },
       timeout: 10000,
-      responseType: 'json'
+      responseType: 'json',
+      validateStatus: function (status) {
+        return status >= 200 && status < 500;
+      }
     });
 
     clearTimeout(timeout);
+
+    if (typeof response.data === 'string' && response.data.includes('<html')) {
+      const embed = new EmbedBuilder()
+        .setTitle('⚠️ Roblox Server Error')
+        .setDescription('The Roblox server returned an HTML error page')
+        .setColor(0xFF0000)
+        .addFields(
+          {
+            name: '🔴 Status Code',
+            value: `\`${response.status}\``,
+            inline: true
+          },
+          {
+            name: '📄 Response Type',
+            value: '```HTML Error Page```',
+            inline: true
+          }
+        )
+        .setFooter({ text: 'This usually indicates a server-side configuration issue' });
+      
+      return message.reply({ embeds: [embed] });
+    }
 
     const embed = new EmbedBuilder()
       .setDescription(`✅ **Request Queued:** Data request for \`${playerKey}\` has been sent to Roblox client.`)
@@ -233,17 +297,36 @@ discordClient.on('messageCreate', async message => {
     console.error('Command error:', err);
     
     const embed = new EmbedBuilder()
-      .setTitle('⚠️ Error')
+      .setTitle('⚠️ Command Error')
       .setColor(0xFF0000);
 
     if (err.response) {
-      embed.setDescription(`**Status ${err.response.status}** - Request failed`);
-      if (err.response.data) {
+      if (typeof err.response.data === 'string' && err.response.data.includes('<html')) {
+        embed.setDescription('**Roblox Server Error** - Received HTML error page');
         embed.addFields({
-          name: 'Response',
-          value: `\`\`\`json\n${JSON.stringify(err.response.data).substring(0, 1000)}\n\`\`\``
+          name: '🔴 Status Code',
+          value: `\`${err.response.status}\``,
+          inline: true
+        }, {
+          name: '📄 Content Type',
+          value: '```text/html```',
+          inline: true
         });
+      } else {
+        embed.setDescription(`**Status ${err.response.status}** - Request failed`);
+        if (err.response.data) {
+          embed.addFields({
+            name: 'Response',
+            value: `\`\`\`json\n${JSON.stringify(err.response.data).substring(0, 1000)}\n\`\`\``
+          });
+        }
       }
+    } else if (err.request) {
+      embed.setDescription('**Network Error** - No response received from server');
+      embed.addFields({
+        name: 'Possible Causes',
+        value: '```1. Server is down\n2. Network issues\n3. Request timeout```'
+      });
     } else {
       embed.setDescription(`**Error:** ${err.message}`);
     }
