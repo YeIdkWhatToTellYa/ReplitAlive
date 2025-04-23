@@ -108,14 +108,29 @@ app.post('/data-response', express.json(), (req, res) => {
   
   try {
     const { playerId, data, success, error, metadata } = req.body;
-    if (!playerId) {
-      return res.status(400).json({ error: 'Missing playerId' });
-    }
+    if (!playerId) return res.status(400).json({ error: 'Missing playerId' });
 
     const channel = pendingRequests.get(playerId);
-    if (!channel) {
-      console.log('No pending request for', playerId);
-      return res.status(200).json({ status: 'no pending request' });
+    if (!channel) return res.status(200).json({ status: 'no pending request' });
+
+    const formatValue = (value) => {
+      if (typeof value === 'boolean') return value ? '✅ true' : '❌ false';
+      if (value === null) return '∅ null';
+      if (value === undefined) return 'undefined';
+      return value;
+    };
+
+    let formattedText = '```\n';
+    const displayData = data?.data || data || {};
+    
+    for (const [key, value] of Object.entries(displayData)) {
+      formattedText += `${key.padEnd(25)}: ${formatValue(value)}\n`;
+      
+      if (formattedText.length > 1500) {
+        formattedText += '```';
+        channel.send(formattedText);
+        formattedText = '```\n';
+      }
     }
 
     const embed = new EmbedBuilder()
@@ -123,49 +138,13 @@ app.post('/data-response', express.json(), (req, res) => {
       .setTitle(`${success === false ? '❌' : '📊'} Player Data: ${playerId}`)
       .setTimestamp();
 
-    if (metadata) {
-      if (metadata.serverId) embed.addFields({ name: 'Server ID', value: metadata.serverId, inline: true });
-      if (metadata.placeId) embed.addFields({ name: 'Place ID', value: metadata.placeId.toString(), inline: true });
-    }
+    if (metadata?.serverId) embed.addFields({ name: 'Server', value: metadata.serverId, inline: true });
+    if (metadata?.placeId) embed.addFields({ name: 'Place', value: metadata.placeId.toString(), inline: true });
 
     if (success === false) {
-      embed.setDescription('**Command Execution Failed**')
-           .addFields({ name: 'Error', value: `\`\`\`${error || 'Unknown error'}\`\`\`` });
-    } 
-    else if (data) {
-      console.log('Processing data:', JSON.stringify(data, null, 2));
-      
-      const displayData = data.data ? data.data : data;
-      
-      if (typeof displayData === 'object' && displayData !== null) {
-        for (const [key, value] of Object.entries(displayData)) {
-          if (value === undefined || value === null) continue;
-          
-          let stringValue;
-          try {
-            stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
-          } catch (e) {
-            stringValue = '[Unserializable Data]';
-          }
-          
-          embed.addFields({
-            name: key,
-            value: `\`\`\`${stringValue.substring(0, 1000)}\`\`\``,
-            inline: key.length < 20
-          });
-        }
-        
-        if (Object.keys(displayData).length === 0) {
-          embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
-        }
-      } else {
-        embed.addFields({
-          name: 'Result',
-          value: `\`\`\`${String(displayData)}\`\`\``
-        });
-      }
+      embed.setDescription(`**Command Failed**\n\`\`\`${error}\`\`\``);
     } else {
-      embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
+      embed.setDescription(formattedText + '```');
     }
 
     channel.send({ embeds: [embed] });
@@ -174,10 +153,7 @@ app.post('/data-response', express.json(), (req, res) => {
 
   } catch (err) {
     console.error('Data processing error:', err);
-    res.status(500).json({ 
-      error: 'Internal server error',
-      details: err.message 
-    });
+    res.status(500).json({ error: 'Internal server error' });
   }
 });
 
