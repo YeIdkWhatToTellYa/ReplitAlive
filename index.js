@@ -100,26 +100,66 @@ app.post('/discord-command', (req, res) => {
   });
 });
 
-app.post('/data-response', express.json(), (req, res) => {
-  console.log('\n[DATA FROM ROBLOX]');
-  console.log('Body:', req.body);
-
+app.post('/data-response', (req, res) => {
   const { playerId, data } = req.body;
   if (!playerId) {
     return res.status(400).json({ error: 'Missing playerId' });
   }
 
+  console.log(`Received data for ${playerId}`);
   const channel = pendingRequests.get(playerId);
+  
   if (channel) {
-    channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+    try {
+      const embed = {
+        title: `Player Data: ${playerId}`,
+        color: 0x0099ff,
+        fields: [],
+        timestamp: new Date(),
+        footer: {
+          text: `Server ID: ${req.body.serverId || 'Unknown'}`
+        }
+      };
+
+      if (data && typeof data === 'object') {
+        for (const [key, value] of Object.entries(data)) {
+          embed.fields.push({
+            name: key,
+            value: typeof value === 'object' 
+              ? '```json\n' + JSON.stringify(value, null, 2) + '\n```'
+              : String(value),
+            inline: true
+          });
+        }
+      } else {
+        embed.fields.push({
+          name: 'Result',
+          value: data !== nil 
+            ? '```lua\n' + String(data) + '\n```' 
+            : 'No data found',
+          inline: false
+        });
+      }
+
+      channel.send({ 
+        content: `📊 Data received for ${playerId}`,
+        embeds: [embed] 
+      }).catch(err => {
+        console.error('Failed to send embed:', err);
+        channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``)
+          .catch(console.error);
+      });
+
+    } catch (err) {
+      console.error('Error creating embed:', err);
+      channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``)
+        .catch(console.error);
+    }
+
     pendingRequests.delete(playerId);
   }
 
   res.json({ status: 'success' });
-});
-
-discordClient.on('ready', () => {
-  console.log(`\n🤖 Bot logged in as ${discordClient.user.tag}`);
 });
 
 discordClient.on('messageCreate', async message => {
