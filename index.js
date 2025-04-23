@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { Client, GatewayIntentBits } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
 const axios = require('axios');
 const app = express();
 
@@ -111,7 +111,41 @@ app.post('/data-response', express.json(), (req, res) => {
 
   const channel = pendingRequests.get(playerId);
   if (channel) {
-    channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``);
+    const embed = new EmbedBuilder()
+      .setTitle('📊 Player Data Response')
+      .setDescription(`Data received from Roblox client for player: \`${playerId}\``)
+      .setColor(0x00AE86)
+      .setTimestamp()
+      .addFields(
+        {
+          name: '🔹 Player ID',
+          value: `\`\`\`${playerId}\`\`\``,
+          inline: true
+        },
+        {
+          name: '📅 Response Time',
+          value: `<t:${Math.floor(Date.now()/1000)}:R>`,
+          inline: true
+        }
+      );
+
+    if (typeof data === 'object' && data !== null) {
+      for (const [key, value] of Object.entries(data)) {
+        embed.addFields({
+          name: `📌 ${key}`,
+          value: `\`\`\`json\n${JSON.stringify(value, null, 2).substring(0, 1000)}\`\`\``,
+          inline: false
+        });
+      }
+    } else {
+      embed.addFields({
+        name: '📌 Data',
+        value: `\`\`\`${data}\`\`\``,
+        inline: false
+      });
+    }
+
+    channel.send({ embeds: [embed] });
     pendingRequests.delete(playerId);
   }
 
@@ -120,6 +154,11 @@ app.post('/data-response', express.json(), (req, res) => {
 
 discordClient.on('ready', () => {
   console.log(`\n🤖 Bot logged in as ${discordClient.user.tag}`);
+  
+  discordClient.user.setPresence({
+    activities: [{ name: 'Roblox Data', type: 3 }],
+    status: 'online'
+  });
 });
 
 discordClient.on('messageCreate', async message => {
@@ -127,12 +166,24 @@ discordClient.on('messageCreate', async message => {
 
   try {
     if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      return message.reply('❌ Admin only').then(m => setTimeout(() => m.delete(), 5000));
+      const embed = new EmbedBuilder()
+        .setDescription('❌ **Error:** This command is for administrators only.')
+        .setColor(0xFF0000);
+      return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
     }
 
     const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
     if (!playerId) {
-      return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
+      const embed = new EmbedBuilder()
+        .setTitle('ℹ️ Command Usage')
+        .setDescription('```!getdata <playerId>```')
+        .setColor(0x3498DB)
+        .addFields({
+          name: 'Example',
+          value: '```!getdata 123456789```',
+          inline: true
+        });
+      return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
     }
 
     const playerKey = `Player_${playerId}`;
@@ -141,7 +192,10 @@ discordClient.on('messageCreate', async message => {
     const timeout = setTimeout(() => {
       if (pendingRequests.has(playerKey)) {
         pendingRequests.delete(playerKey);
-        message.channel.send(`⌛ Timeout fetching data for ${playerKey}`);
+        const embed = new EmbedBuilder()
+          .setDescription(`⌛ **Timeout:** No response received for \`${playerKey}\``)
+          .setColor(0xFFA500);
+        message.channel.send({ embeds: [embed] });
       }
     }, REQUEST_TIMEOUT);
 
@@ -160,22 +214,41 @@ discordClient.on('messageCreate', async message => {
 
     clearTimeout(timeout);
 
-    await message.reply(`✅ Request queued for ${playerKey}. Waiting for Roblox client...`);
+    const embed = new EmbedBuilder()
+      .setDescription(`✅ **Request Queued:** Data request for \`${playerKey}\` has been sent to Roblox client.`)
+      .setColor(0x2ECC71)
+      .addFields({
+        name: '⏳ Status',
+        value: 'Waiting for response...',
+        inline: true
+      }, {
+        name: '🕒 Timeout',
+        value: `${REQUEST_TIMEOUT/1000} seconds`,
+        inline: true
+      });
+
+    await message.reply({ embeds: [embed] });
 
   } catch (err) {
     console.error('Command error:', err);
     
-    let errorMsg = '⚠️ Error: ';
+    const embed = new EmbedBuilder()
+      .setTitle('⚠️ Error')
+      .setColor(0xFF0000);
+
     if (err.response) {
-      errorMsg += `Status ${err.response.status}`;
+      embed.setDescription(`**Status ${err.response.status}** - Request failed`);
       if (err.response.data) {
-        errorMsg += ` - ${JSON.stringify(err.response.data).substring(0, 100)}`;
+        embed.addFields({
+          name: 'Response',
+          value: `\`\`\`json\n${JSON.stringify(err.response.data).substring(0, 1000)}\n\`\`\``
+        });
       }
     } else {
-      errorMsg += err.message;
+      embed.setDescription(`**Error:** ${err.message}`);
     }
 
-    message.reply(errorMsg).then(m => setTimeout(() => m.delete(), 10000));
+    message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 10000));
   }
 });
 
