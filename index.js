@@ -100,55 +100,60 @@ app.post('/discord-command', (req, res) => {
   });
 });
 
-app.post('/data-response', (req, res) => {
-  const { playerId, data } = req.body;
+app.post('/data-response', express.json(), (req, res) => {
+  console.log('\n[DATA FROM ROBLOX]');
+  console.log('Body:', req.body);
+
+  const { playerId, data, serverId } = req.body;
   if (!playerId) {
     return res.status(400).json({ error: 'Missing playerId' });
   }
 
-  console.log(`Received data for ${playerId}`);
   const channel = pendingRequests.get(playerId);
-  
   if (channel) {
     try {
       const embed = {
-        title: `Player Data: ${playerId}`,
-        color: 0x0099ff,
+        color: 0x5865F2,
+        title: `📊 Player Data: ${playerId}`,
+        description: 'Retrieved from Roblox DataStore',
         fields: [],
-        timestamp: new Date(),
+        timestamp: new Date().toISOString(),
         footer: {
-          text: `Server ID: ${req.body.serverId || 'Unknown'}`
+          text: serverId ? `Server ID: ${serverId}` : 'DataStore Service'
         }
       };
 
-      if (data && typeof data === 'object') {
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
         for (const [key, value] of Object.entries(data)) {
           embed.fields.push({
             name: key,
-            value: typeof value === 'object' 
-              ? '```json\n' + JSON.stringify(value, null, 2) + '\n```'
-              : String(value),
-            inline: true
+            value: formatValueForDiscord(value),
+            inline: shouldInline(key, value)
+          });
+        }
+        
+        if (embed.fields.length === 0) {
+          embed.fields.push({
+            name: 'Notice',
+            value: 'DataStore exists but is empty',
+            inline: false
           });
         }
       } else {
         embed.fields.push({
-          name: 'Result',
-          value: data !== nil 
-            ? '```lua\n' + String(data) + '\n```' 
-            : 'No data found',
+          name: 'Data',
+          value: formatValueForDiscord(data),
           inline: false
         });
       }
 
-      channel.send({ 
-        content: `📊 Data received for ${playerId}`,
-        embeds: [embed] 
-      }).catch(err => {
-        console.error('Failed to send embed:', err);
-        channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``)
-          .catch(console.error);
-      });
+      channel.send({ embeds: [embed] })
+        .then(() => console.log(`Sent embed for ${playerId}`))
+        .catch(err => {
+          console.error('Failed to send embed:', err);
+          channel.send(`📊 ${playerId} Data:\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\``)
+            .catch(console.error);
+        });
 
     } catch (err) {
       console.error('Error creating embed:', err);
@@ -162,63 +167,32 @@ app.post('/data-response', (req, res) => {
   res.json({ status: 'success' });
 });
 
-discordClient.on('messageCreate', async message => {
-  if (message.author.bot || !message.content.startsWith('!getdata')) return;
-
-  try {
-    if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      return message.reply('❌ Admin only').then(m => setTimeout(() => m.delete(), 5000));
-    }
-
-    const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
-    if (!playerId) {
-      return message.reply('Usage: `!getdata <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
-    }
-
-    const playerKey = `Player_${playerId}`;
-    pendingRequests.set(playerKey, message.channel);
-
-    const timeout = setTimeout(() => {
-      if (pendingRequests.has(playerKey)) {
-        pendingRequests.delete(playerKey);
-        message.channel.send(`⌛ Timeout fetching data for ${playerKey}`);
-      }
-    }, REQUEST_TIMEOUT);
-
-    const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
-      playerId: playerKey
-    }, {
-      headers: { 
-        'x-api-key': CONFIG.API_PASSCODE,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 10000,
-      responseType: 'json'
-    });
-
-    clearTimeout(timeout);
-
-    await message.reply(`✅ Request queued for ${playerKey}. Waiting for Roblox client...`);
-
-  } catch (err) {
-    console.error('Command error:', err);
-    
-    let errorMsg = '⚠️ Error: ';
-    if (err.response) {
-      errorMsg += `Status ${err.response.status}`;
-      if (err.response.data) {
-        errorMsg += ` - ${JSON.stringify(err.response.data).substring(0, 100)}`;
-      }
-    } else {
-      errorMsg += err.message;
-    }
-
-    message.reply(errorMsg).then(m => setTimeout(() => m.delete(), 10000));
+function formatValueForDiscord(value) {
+  if (value === null || value === undefined) {
+    return '`nil`';
   }
-});
+  
+  if (typeof value === 'object') {
+    return '```json\n' + JSON.stringify(value, null, 2) + '\n```';
+  }
+  
+  if (typeof value === 'string') {
+    return value.length > 1000 
+      ? '```' + value.substring(0, 1000) + '...```' 
+      : '`' + value + '`';
+  }
+  
+  return '`' + String(value) + '`';
+}
 
+function shouldInline(key, value) {
+  if (typeof value === 'object' || String(value).length > 25) {
+    return false;
+  }
+  
+  const noInlineFields = ['id', 'userId', 'playerId', 'data'];
+  return !noInlineFields.includes(key.toLowerCase());
+}
 discordClient.login(CONFIG.DISCORD_TOKEN)
   .then(() => console.log('🤖 Bot login successful'))
   .catch(err => {
