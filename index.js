@@ -38,7 +38,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Health check endpoint
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
@@ -105,7 +104,7 @@ app.post('/discord-command', (req, res) => {
 
 
 app.post('/data-response', express.json(), (req, res) => {
-  console.log('\n[DATA FROM ROBLOX]');
+  console.log('\n[DATA FROM ROBLOX] Received:', JSON.stringify(req.body, null, 2));
   
   try {
     const { playerId, data, success, error, metadata } = req.body;
@@ -115,6 +114,7 @@ app.post('/data-response', express.json(), (req, res) => {
 
     const channel = pendingRequests.get(playerId);
     if (!channel) {
+      console.log('No pending request for', playerId);
       return res.status(200).json({ status: 'no pending request' });
     }
 
@@ -123,30 +123,49 @@ app.post('/data-response', express.json(), (req, res) => {
       .setTitle(`${success === false ? '❌' : '📊'} Player Data: ${playerId}`)
       .setTimestamp();
 
-    if (metadata?.serverId) {
-      embed.addFields({ name: 'Server ID', value: metadata.serverId, inline: true });
+    if (metadata) {
+      if (metadata.serverId) embed.addFields({ name: 'Server ID', value: metadata.serverId, inline: true });
+      if (metadata.placeId) embed.addFields({ name: 'Place ID', value: metadata.placeId.toString(), inline: true });
     }
 
     if (success === false) {
       embed.setDescription('**Command Execution Failed**')
            .addFields({ name: 'Error', value: `\`\`\`${error || 'Unknown error'}\`\`\`` });
-    } else if (data?.data) {
-      const displayData = data.data;
+    } 
+    else if (data) {
+      console.log('Processing data:', JSON.stringify(data, null, 2));
       
-      if (typeof displayData === 'object') {
+      const displayData = data.data ? data.data : data;
+      
+      if (typeof displayData === 'object' && displayData !== null) {
         for (const [key, value] of Object.entries(displayData)) {
+          if (value === undefined || value === null) continue;
+          
+          let stringValue;
+          try {
+            stringValue = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+          } catch (e) {
+            stringValue = '[Unserializable Data]';
+          }
+          
           embed.addFields({
             name: key,
-            value: `\`\`\`${typeof value === 'string' ? value : JSON.stringify(value, null, 2)}\`\`\``.substring(0, 1024),
-            inline: key.length < 15
+            value: `\`\`\`${stringValue.substring(0, 1000)}\`\`\``,
+            inline: key.length < 20
           });
+        }
+        
+        if (Object.keys(displayData).length === 0) {
+          embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
         }
       } else {
         embed.addFields({
-          name: 'Data',
-          value: `\`\`\`${displayData}\`\`\``
+          name: 'Result',
+          value: `\`\`\`${String(displayData)}\`\`\``
         });
       }
+    } else {
+      embed.setDescription('✅ Command executed successfully\n*(No data returned)*');
     }
 
     channel.send({ embeds: [embed] });
