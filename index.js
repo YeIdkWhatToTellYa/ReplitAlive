@@ -122,7 +122,7 @@ app.post('/data-response', express.json(), (req, res) => {
       const formattedValue = typeof value === 'boolean' 
         ? (value ? '✅ true' : '❌ false')
         : value;
-
+      
       const changeIndicator = typeof value === 'number' 
         ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
         : ' ';
