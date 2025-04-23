@@ -104,6 +104,7 @@ app.post('/data-response', express.json(), (req, res) => {
   console.log('\n[DATA FROM ROBLOX]');
   
   try {
+    // Check for HTML error responses
     if (req.headers['content-type']?.includes('text/html')) {
       console.error('Received HTML error page instead of JSON response');
       return res.status(500).json({ 
@@ -113,7 +114,7 @@ app.post('/data-response', express.json(), (req, res) => {
     }
 
     console.log('Body:', req.body);
-    const { playerId, data } = req.body;
+    const { playerId, data, serverId, timestamp } = req.body;
     
     if (!playerId) {
       return res.status(400).json({ error: 'Missing playerId' });
@@ -121,7 +122,34 @@ app.post('/data-response', express.json(), (req, res) => {
 
     const channel = pendingRequests.get(playerId);
     if (channel) {
-      if (typeof data === 'string' && data.includes('<html') && data.includes('Internal Server Error')) {
+      // Handle error responses
+      if (data && data.error) {
+        const errorEmbed = new EmbedBuilder()
+          .setTitle('⚠️ Command Execution Error')
+          .setDescription(`Error occurred while processing command for: \`${playerId}\``)
+          .setColor(0xFF0000)
+          .addFields(
+            {
+              name: '🔴 Error Message',
+              value: `\`\`\`${data.message || 'Unknown error'}\`\`\``,
+              inline: false
+            },
+            {
+              name: '🆔 Server ID',
+              value: `\`${serverId || 'Unknown'}\``,
+              inline: true
+            },
+            {
+              name: '📅 Time',
+              value: timestamp ? `<t:${Math.floor(timestamp)}:R>` : 'Unknown',
+              inline: true
+            }
+          );
+        
+        channel.send({ embeds: [errorEmbed] });
+      } 
+      // Handle HTML error pages in data
+      else if (typeof data === 'string' && data.includes('<html') && data.includes('Internal Server Error')) {
         const errorEmbed = new EmbedBuilder()
           .setTitle('⚠️ Roblox Server Error')
           .setDescription(`Roblox server returned an error for player: \`${playerId}\``)
@@ -141,7 +169,9 @@ app.post('/data-response', express.json(), (req, res) => {
           .setFooter({ text: 'Check the Roblox server logs for more details' });
         
         channel.send({ embeds: [errorEmbed] });
-      } else {
+      } 
+      // Success response
+      else {
         const successEmbed = new EmbedBuilder()
           .setTitle('📊 Player Data Response')
           .setDescription(`Data received from Roblox client for player: \`${playerId}\``)
@@ -154,24 +184,43 @@ app.post('/data-response', express.json(), (req, res) => {
               inline: true
             },
             {
+              name: '🆔 Server ID',
+              value: `\`${serverId || 'Unknown'}\``,
+              inline: true
+            },
+            {
               name: '📅 Response Time',
-              value: `<t:${Math.floor(Date.now()/1000)}:R>`,
+              value: timestamp ? `<t:${Math.floor(timestamp)}:R>` : 'Unknown',
               inline: true
             }
           );
 
-        if (typeof data === 'object' && data !== null) {
-          for (const [key, value] of Object.entries(data)) {
+        if (data !== null && data !== undefined) {
+          if (typeof data === 'object') {
+            for (const [key, value] of Object.entries(data)) {
+              // Skip undefined values
+              if (value !== undefined) {
+                successEmbed.addFields({
+                  name: `📌 ${key}`,
+                  value: `\`\`\`json\n${JSON.stringify(value, (k, v) => 
+                    v === Infinity ? "Infinity" : 
+                    v === -Infinity ? "-Infinity" : 
+                    Number.isNaN(v) ? "NaN" : v, 2).substring(0, 1000)}\`\`\``,
+                  inline: false
+                });
+              }
+            }
+          } else {
             successEmbed.addFields({
-              name: `📌 ${key}`,
-              value: `\`\`\`json\n${JSON.stringify(value, null, 2).substring(0, 1000)}\`\`\``,
+              name: '📌 Data',
+              value: `\`\`\`${data}\`\`\``,
               inline: false
             });
           }
         } else {
           successEmbed.addFields({
             name: '📌 Data',
-            value: `\`\`\`${data}\`\`\``,
+            value: '```null```',
             inline: false
           });
         }
