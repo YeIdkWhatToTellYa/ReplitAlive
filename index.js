@@ -5,7 +5,7 @@ const axios = require('axios');
 const app = express();
 
 const CONFIG = {
-  PORT: process.env.PORT || 3000,
+  PORT: 3000,
   API_PASSCODE: process.env.API_PASSCODE,
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SERVER_URL: process.env.ROBLOX_SERVER_URL
@@ -22,6 +22,7 @@ const discordClient = new Client({
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverList = new Map();
+const REQUEST_TIMEOUT = 30000;
 
 app.use(express.json());
 
@@ -30,13 +31,13 @@ app.get('/get-command', (req, res) => {
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
-  const [playerId, commandData] = commandQueue.entries().next().value || [];
-  if (commandData) {
-    commandQueue.delete(playerId);
+  const nextCommand = Array.from(commandQueue.values())[0];
+  if (nextCommand) {
+    commandQueue.delete(nextCommand.playerId);
     return res.json({
       status: 'success',
-      command: commandData.command,
-      playerId: commandData.playerId
+      command: nextCommand.command,
+      playerId: nextCommand.playerId
     });
   }
   return res.json({ status: 'success', command: 'return "No pending commands"' });
@@ -64,30 +65,31 @@ app.post('/data-response', express.json(), (req, res) => {
     const channel = pendingRequests.get(playerId);
     if (!channel) return res.status(200).json({ status: 'no pending request' });
 
-    let message = '';
     if (playerId.startsWith('ServerList_')) {
-      if (data?.result?.jobId) {
-        serverList.set(data.result.jobId, data.result);
-      }
+      serverList.set(metadata.serverId, data.result);
       pendingRequests.delete(playerId);
       return res.json({ status: 'success' });
     }
 
+    let message = '';
     if (playerId.startsWith('AllServers_')) {
       message = '🌐 **Active Servers**\n```\n';
+      let totalPlayers = 0;
+      
       serverList.forEach((server, id) => {
         message += `Server: ${id}\nPlayers: ${server.count}/${server.maxPlayers}\n`;
         if (server.players?.length > 0) {
           message += `Players: ${server.players.join(', ')}\n`;
         }
         message += '----------------\n';
+        totalPlayers += server.count;
       });
-      message += '```';
+      message += `Total Players: ${totalPlayers}\n\`\`\``;
     } else {
-      message = `📊 **Data for ${playerId}**\n\`\`\`diff\n`;
+      message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
       for (const [key, value] of Object.entries(data?.result || {})) {
         const formattedValue = Array.isArray(value) ? value.join(', ') : 
-                           typeof value === 'object' ? JSON.stringify(value) : value;
+                            typeof value === 'object' ? JSON.stringify(value) : value;
         message += `${key}: ${formattedValue}\n`;
       }
       message += '```';
@@ -118,11 +120,15 @@ discordClient.on('messageCreate', async message => {
   const args = message.content.split(' ');
   const command = args[0].toLowerCase();
 
-  if (['!getservers', '!getserverinfo', '!getdata', '!execute', '!searchforplayer'].includes(command)) {
+  // Only check permissions for our commands
+  const commands = ['!getservers', '!getserverinfo', '!getdata', '!execute', '!searchforplayer'];
+  if (commands.includes(command)) {
     if (!message.member?.permissions.has('Administrator')) {
       return message.reply({ content: '❌ You need admin permissions for this command' })
         .then(m => setTimeout(() => m.delete(), 5000));
     }
+  } else {
+    return; // Ignore non-command messages
   }
 
   try {
@@ -141,32 +147,10 @@ discordClient.on('messageCreate', async message => {
             count = #players,
             maxPlayers = game.Players.MaxPlayers
           }`,
-        playerId: `ServerList_${requestId}`
+        playerId: `ServerList_${Date.now()}`
       }, { headers: { 'x-api-key': CONFIG.API_PASSCODE } });
 
-      setTimeout(() => {
-        if (serverList.size === 0) {
-          return message.channel.send('❌ No servers responded');
-        }
-
-        let messageContent = '🌐 **Active Servers**\n```\n';
-        serverList.forEach((server, id) => {
-          messageContent += `Server: ${id}\nPlayers: ${server.count}/${server.maxPlayers}\n`;
-          if (server.players?.length > 0) {
-            messageContent += `Players: ${server.players.join(', ')}\n`;
-          }
-          messageContent += '----------------\n';
-        });
-        messageContent += '```';
-
-        const embed = new EmbedBuilder()
-          .setColor(0x00AE86)
-          .setDescription(messageContent);
-
-        message.channel.send({ embeds: [embed] });
-      }, 3000); 
-
-      await message.reply('✅ Fetching server list...');
+      await message.reply('✅ Collecting data from all servers...');
 
     } else if (command === '!getserverinfo') {
       const serverId = args[1];
@@ -178,11 +162,11 @@ discordClient.on('messageCreate', async message => {
 
       await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
         command: `local players = game:GetService("Players"):GetPlayers()
-          local names = {}
-          for _, p in ipairs(players) do table.insert(names, p.Name) end
+          local list = {}
+          for _, p in ipairs(players) do table.insert(list, p.Name) end
           return {
             jobId = game.JobId,
-            players = names,
+            players = list,
             count = #players,
             maxPlayers = game.Players.MaxPlayers
           }`,
