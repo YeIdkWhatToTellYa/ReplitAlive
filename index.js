@@ -26,12 +26,6 @@ const serverList = new Map();
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  next();
-});
 
 app.get('/get-command', (req, res) => {
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
@@ -83,7 +77,7 @@ app.post('/data-response', express.json(), (req, res) => {
       return res.json({ status: 'success' });
     }
 
-    const playerData = data?.result || {};
+    const responseData = data?.result || {};
     let message = '';
 
     if (playerId.startsWith('AllServers_')) {
@@ -93,17 +87,17 @@ app.post('/data-response', express.json(), (req, res) => {
       serverList.forEach((server, id) => {
         message += `Server: ${id}\nPlayers: ${server.count}/${server.maxPlayers}\n`;
         if (server.players && server.players.length > 0) {
-          message += `Player List: ${server.players.join(', ')}\n`;
+          message += `Players: ${server.players.join(', ')}\n`;
         }
         message += '----------------\n';
         totalPlayers += server.count;
       });
 
-      message += `\nTotal Players Across All Servers: ${totalPlayers}\n`;
+      message += `\nTotal Players: ${totalPlayers}\n`;
       message += '```';
     } else {
       message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
-      for (const [key, value] of Object.entries(playerData)) {
+      for (const [key, value] of Object.entries(responseData)) {
         let formattedValue = Array.isArray(value) ? value.join(', ') : value;
         if (typeof value === 'object') formattedValue = JSON.stringify(value);
         const changeIndicator = typeof value === 'number' ? (value > 0 ? '+' : '-') : ' ';
@@ -122,6 +116,7 @@ app.post('/data-response', express.json(), (req, res) => {
     res.json({ status: 'success' });
 
   } catch (err) {
+    console.error('Error processing response:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -210,9 +205,50 @@ discordClient.on('messageCreate', async message => {
         .setDescription(`Fetching info for server ${serverId}...`);
 
       await message.reply({ embeds: [embed] });
+    } else if (command === '!getdata') {
+      const playerId = args[1]?.match(/\d+/)?.[0];
+      if (!playerId) {
+        const embed = new EmbedBuilder()
+          .setColor(0xffa500)
+          .setTitle('ℹ️ Usage')
+          .setDescription('`!getdata <playerId>`');
+        return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
+      }
+
+      const playerKey = `Player_${playerId}`;
+      pendingRequests.set(playerKey, message.channel);
+
+      const timeout = setTimeout(() => {
+        if (pendingRequests.has(playerKey)) {
+          pendingRequests.delete(playerKey);
+          const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle('⌛ Timeout')
+            .setDescription(`Failed to fetch data for ${playerKey} within ${REQUEST_TIMEOUT/1000} seconds`);
+          message.channel.send({ embeds: [embed] });
+        }
+      }, REQUEST_TIMEOUT);
+
+      await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
+        playerId: playerKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json'
+        }
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Request Queued')
+        .setDescription(`Fetching data for player ${playerId}...`);
+
+      await message.reply({ embeds: [embed] });
     }
 
   } catch (err) {
+    console.error('Command error:', err);
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
       .setTitle('⚠️ Error')
@@ -222,7 +258,7 @@ discordClient.on('messageCreate', async message => {
   }
 });
 
-discordClient.login(CONFIG.DISCORD_TOKEN);
+discordClient.login(CONFIG.DISCORD_TOKEN).catch(console.error);
 app.listen(CONFIG.PORT, () => {
   console.log(`Server running on port ${CONFIG.PORT}`);
 });
