@@ -102,7 +102,6 @@ app.post('/discord-command', (req, res) => {
   });
 });
 
-
 app.post('/data-response', express.json(), (req, res) => {
   console.log('\n[DATA FROM ROBLOX] Raw:', JSON.stringify(req.body, null, 2));
 
@@ -164,69 +163,202 @@ discordClient.on('ready', () => {
   console.log(`\n🤖 Bot logged in as ${discordClient.user.tag}`);
 });
 
-
-// NEW
-
 discordClient.on('messageCreate', async message => {
   if (message.author.bot) return;
 
   try {
-    // Existing !getdata command
-    if (message.content.startsWith('!getdata')) {
-     const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
-    if (!playerId) {
+    if (!message.member?.permissions?.has('ADMINISTRATOR')) {
       const embed = new EmbedBuilder()
-        .setColor(0xffa500)
-        .setTitle('ℹ️ Usage')
-        .setDescription('`!getdata <playerId>`');
+        .setColor(0xff0000)
+        .setTitle('❌ Access Denied')
+        .setDescription('This command is restricted to administrators only.');
       return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
     }
 
-    const playerKey = `Player_${playerId}`;
-    pendingRequests.set(playerKey, message.channel);
+    const args = message.content.split(' ');
+    const command = args[0].toLowerCase();
 
-    const timeout = setTimeout(() => {
-      if (pendingRequests.has(playerKey)) {
-        pendingRequests.delete(playerKey);
+    if (command === '!getdata') {
+      const playerId = args[1]?.match(/\d+/)?.[0];
+      if (!playerId) {
         const embed = new EmbedBuilder()
           .setColor(0xffa500)
-          .setTitle('⌛ Timeout')
-          .setDescription(`Failed to fetch data for ${playerKey} within ${REQUEST_TIMEOUT/1000} seconds`)
-          .addFields({
-            name: 'Possible Causes',
-            value: '- Roblox server offline\n- Player not in game\n- Network issues',
-            inline: false
-          });
-        message.channel.send({ embeds: [embed] });
+          .setTitle('ℹ️ Usage')
+          .setDescription('`!getdata <playerId>`');
+        return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
       }
-    }, REQUEST_TIMEOUT);
 
-    const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-      command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
-      playerId: playerKey
-    }, {
-      headers: { 
-        'x-api-key': CONFIG.API_PASSCODE,
-        'Content-Type': 'application/json',
-        'Accept': 'application/json'
-      },
-      timeout: 10000,
-      responseType: 'json'
-    });
+      const playerKey = `Player_${playerId}`;
+      pendingRequests.set(playerKey, message.channel);
 
-    clearTimeout(timeout);
+      const timeout = setTimeout(() => {
+        if (pendingRequests.has(playerKey)) {
+          pendingRequests.delete(playerKey);
+          const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle('⌛ Timeout')
+            .setDescription(`Failed to fetch data for ${playerKey} within ${REQUEST_TIMEOUT/1000} seconds`)
+            .addFields({
+              name: 'Possible Causes',
+              value: '- Roblox server offline\n- Player not in game\n- Network issues',
+              inline: false
+            });
+          message.channel.send({ embeds: [embed] });
+        }
+      }, REQUEST_TIMEOUT);
 
-    const embed = new EmbedBuilder()
-      .setColor(0x00ff00)
-      .setTitle('✅ Request Queued')
-      .setDescription(`Waiting for Roblox client to respond with data for **${playerKey}**`)
-      .addFields(
-        { name: 'Status', value: 'Pending', inline: true },
-        { name: 'Timeout', value: `${REQUEST_TIMEOUT/1000} seconds`, inline: true }
-      )
-      .setTimestamp();
+      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
+        playerId: playerKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
+        timeout: 10000,
+        responseType: 'json'
+      });
 
-    await message.reply({ embeds: [embed] });
+      clearTimeout(timeout);
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Request Queued')
+        .setDescription(`Waiting for Roblox client to respond with data for **${playerKey}**`)
+        .addFields(
+          { name: 'Status', value: 'Pending', inline: true },
+          { name: 'Timeout', value: `${REQUEST_TIMEOUT/1000} seconds`, inline: true }
+        )
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
+    else if (command === '!getservers') {
+      const serverKey = 'ServerList';
+      pendingRequests.set(serverKey, message.channel);
+
+      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `return game:GetService("DataStoreService"):GetDataStore("ServerData"):GetAsync("${serverKey}") or {}`,
+        playerId: serverKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Request Queued')
+        .setDescription(`Fetching server list...`)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
+    else if (command === '!getserverinfo') {
+      const serverId = args[1];
+      if (!serverId) {
+        const embed = new EmbedBuilder()
+          .setColor(0xffa500)
+          .setTitle('ℹ️ Usage')
+          .setDescription('`!getserverinfo <serverJobId>`');
+        return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
+      }
+
+      const serverKey = `ServerInfo_${serverId}`;
+      pendingRequests.set(serverKey, message.channel);
+
+      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `return game:GetService("DataStoreService"):GetDataStore("ServerData"):GetAsync("${serverKey}")`,
+        playerId: serverKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Request Queued')
+        .setDescription(`Fetching server info for **${serverId}**...`)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
+    else if (command === '!execute') {
+      const serverId = args[1];
+      const cmd = args.slice(2).join(' ');
+      
+      if (!serverId || !cmd) {
+        const embed = new EmbedBuilder()
+          .setColor(0xffa500)
+          .setTitle('ℹ️ Usage')
+          .setDescription('`!execute <serverJobId|*> <command>`\nUse * to execute on all servers');
+        return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
+      }
+
+      const executeKey = `Execute_${Date.now()}`;
+      pendingRequests.set(executeKey, message.channel);
+
+      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: serverId === '*' 
+          ? `return game:GetService("DataStoreService"):GetDataStore("ServerCommands"):SetAsync("Broadcast_${Date.now()}", "${cmd}")`
+          : `return game:GetService("DataStoreService"):GetDataStore("ServerCommands"):SetAsync("Server_${serverId}", "${cmd}")`,
+        playerId: executeKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Command Sent')
+        .setDescription(serverId === '*' 
+          ? `Command broadcast to all servers:\n\`${cmd}\``
+          : `Command sent to server ${serverId}:\n\`${cmd}\``)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
+    else if (command === '!searchforplayer') {
+      const playerId = args[1]?.match(/\d+/)?.[0];
+      if (!playerId) {
+        const embed = new EmbedBuilder()
+          .setColor(0xffa500)
+          .setTitle('ℹ️ Usage')
+          .setDescription('`!searchforplayer <playerId>`');
+        return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
+      }
+
+      const searchKey = `SearchPlayer_${playerId}`;
+      pendingRequests.set(searchKey, message.channel);
+
+      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `return game:GetService("DataStoreService"):GetDataStore("PlayerTracking"):GetAsync("Player_${playerId}")`,
+        playerId: searchKey
+      }, {
+        headers: { 
+          'x-api-key': CONFIG.API_PASSCODE,
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        }
+      });
+
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('✅ Search Started')
+        .setDescription(`Searching for player **${playerId}** across all servers...`)
+        .setTimestamp();
+
+      await message.reply({ embeds: [embed] });
+    }
 
   } catch (err) {
     console.error('Command error:', err);
@@ -255,114 +387,6 @@ discordClient.on('messageCreate', async message => {
     }
 
     message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 10000));
-      return;
-    }
-
-    if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      const embed = new EmbedBuilder()
-        .setColor(0xff0000)
-        .setTitle('❌ Access Denied')
-        .setDescription('This command is restricted to administrators only.');
-      return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
-    }
-
-    if (message.content.startsWith('!getservers')) {
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: 'return game:GetService("DataStoreService"):GetDataStore("ActiveServers"):GetAsync("ServerList")',
-        playerId: `SERVER_LIST_${Date.now()}`
-      }, {
-        headers: { 'x-api-key': CONFIG.API_PASSCODE }
-      });
-
-      pendingRequests.set(`SERVER_LIST_${Date.now()}`, message.channel);
-      await message.reply('Fetching server list...');
-      return;
-    }
-
-    if (message.content.startsWith('!getserverinfo')) {
-      const serverId = message.content.split(' ')[1];
-      if (!serverId) {
-        return message.reply('Usage: `!getserverinfo <serverId>`').then(m => setTimeout(() => m.delete(), 5000));
-      }
-
-      const command = `
-        local serverData = game:GetService("DataStoreService"):GetDataStore("ActiveServers"):GetAsync("${serverId}")
-        if serverData then
-          return {
-            players = game:GetService("Players"):GetPlayers(),
-            map = game.ReplicatedStorage.values.MapVoting.Map.Value or "Unknown",
-            vip = serverData.vip or false
-          }
-        end
-        return nil
-      `;
-
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: command,
-        playerId: `SERVER_INFO_${serverId}`
-      }, {
-        headers: { 'x-api-key': CONFIG.API_PASSCODE }
-      });
-
-      pendingRequests.set(`SERVER_INFO_${serverId}`, message.channel);
-      await message.reply(`Fetching info for server ${serverId}...`);
-      return;
-    }
-
-    if (message.content.startsWith('!execute')) {
-      const [_, serverId, ...cmdParts] = message.content.split(' ');
-      const command = cmdParts.join(' ');
-
-      if (!serverId || !command) {
-        return message.reply('Usage: `!execute <serverId|*> <command>`').then(m => setTimeout(() => m.delete(), 5000));
-      }
-
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: serverId === '*' ? command : `if game.JobId == "${serverId}" then ${command} end`,
-        playerId: `EXEC_${Date.now()}`
-      }, {
-        headers: { 'x-api-key': CONFIG.API_PASSCODE }
-      });
-
-      pendingRequests.set(`EXEC_${Date.now()}`, message.channel);
-      await message.reply(`Executing command on ${serverId === '*' ? 'all servers' : serverId}...`);
-      return;
-    }
-
-    if (message.content.startsWith('!searchforplayer')) {
-      const playerId = message.content.split(' ')[1]?.match(/\d+/)?.[0];
-      if (!playerId) {
-        return message.reply('Usage: `!searchforplayer <playerId>`').then(m => setTimeout(() => m.delete(), 5000));
-      }
-
-      const command = `
-        for _, player in ipairs(game:GetService("Players"):GetPlayers()) do
-          if tostring(player.UserId) == "${playerId}" then
-            return {
-              serverId = game.JobId,
-              playerName = player.Name,
-              players = #game:GetService("Players"):GetPlayers()
-            }
-          end
-        end
-        return nil
-      `;
-
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: command,
-        playerId: `SEARCH_${playerId}`
-      }, {
-        headers: { 'x-api-key': CONFIG.API_PASSCODE }
-      });
-
-      pendingRequests.set(`SEARCH_${playerId}`, message.channel);
-      await message.reply(`Searching for player ${playerId}...`);
-      return;
-    }
-
-  } catch (err) {
-    console.error('Command error:', err);
-    message.reply(`⚠️ Error: ${err.message}`).then(m => setTimeout(() => m.delete(), 10000));
   }
 });
 
