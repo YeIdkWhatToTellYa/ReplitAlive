@@ -1,11 +1,11 @@
 require('dotenv').config();
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const axios = require('axios');
 const app = express();
 
 const CONFIG = {
-  PORT: 3000,
+  PORT: process.env.PORT || 3000,
   API_PASSCODE: process.env.API_PASSCODE,
   DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
   SERVER_URL: process.env.ROBLOX_SERVER_URL
@@ -31,14 +31,6 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
   res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   next();
-});
-
-app.get('/', (req, res) => {
-  res.json({
-    status: 'online',
-    server: 'Discord-Roblox Bridge',
-    version: '2.1.0'
-  });
 });
 
 app.get('/get-command', (req, res) => {
@@ -92,7 +84,7 @@ app.post('/data-response', express.json(), (req, res) => {
     }
 
     const playerData = data?.result || {};
-    let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
+    let message = '';
 
     if (playerId.startsWith('AllServers_')) {
       message = '🌐 **Active Servers**\n```\n';
@@ -110,6 +102,7 @@ app.post('/data-response', express.json(), (req, res) => {
       message += `\nTotal Players Across All Servers: ${totalPlayers}\n`;
       message += '```';
     } else {
+      message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
       for (const [key, value] of Object.entries(playerData)) {
         let formattedValue = Array.isArray(value) ? value.join(', ') : value;
         if (typeof value === 'object') formattedValue = JSON.stringify(value);
@@ -140,7 +133,7 @@ discordClient.on('ready', () => {
 
 discordClient.on('messageCreate', async message => {
   if (message.author.bot) return;
-  if (!message.member?.permissions?.has('ADMINISTRATOR')) return;
+  if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
   try {
     const args = message.content.split(' ');
@@ -158,7 +151,7 @@ discordClient.on('messageCreate', async message => {
 
       await message.reply({ embeds: [embed] });
 
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+      await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
         command: `local players = game:GetService("Players"):GetPlayers()
           local playerNames = {}
           for _, player in ipairs(players) do
@@ -170,7 +163,7 @@ discordClient.on('messageCreate', async message => {
             count = #players,
             maxPlayers = game.Players.MaxPlayers
           }`,
-        playerId: `ServerList_${game.JobId}`
+        playerId: `ServerList_${Date.now()}`
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
@@ -191,7 +184,7 @@ discordClient.on('messageCreate', async message => {
       const requestId = `ServerInfo_${serverId}_${Date.now()}`;
       pendingRequests.set(requestId, message.channel);
 
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+      await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
         command: `local players = game:GetService("Players"):GetPlayers()
           local playerList = {}
           for _, player in ipairs(players) do
@@ -230,4 +223,6 @@ discordClient.on('messageCreate', async message => {
 });
 
 discordClient.login(CONFIG.DISCORD_TOKEN);
-app.listen(CONFIG.PORT);
+app.listen(CONFIG.PORT, () => {
+  console.log(`Server running on port ${CONFIG.PORT}`);
+});
