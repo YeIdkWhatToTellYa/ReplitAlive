@@ -327,7 +327,7 @@ discordClient.on('messageCreate', async message => {
       pendingRequests.set(requestId, message.channel);
 
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `local fn, err = loadstring([[${cmd}]])
+        command: `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)([[${cmd}]])
           if not fn then return {error = err} end
           local success, result = pcall(fn)
           if not success then return {error = result} end
