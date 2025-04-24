@@ -19,6 +19,7 @@ const discordClient = new Client({
   ]
 });
 
+const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverList = new Map();
 
@@ -29,13 +30,13 @@ app.get('/get-command', (req, res) => {
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
-  const nextCommand = Array.from(commandQueue.values())[0];
-  if (nextCommand) {
-    commandQueue.delete(nextCommand.playerId);
+  const [playerId, commandData] = commandQueue.entries().next().value || [];
+  if (commandData) {
+    commandQueue.delete(playerId);
     return res.json({
       status: 'success',
-      command: nextCommand.command,
-      playerId: nextCommand.playerId
+      command: commandData.command,
+      playerId: commandData.playerId
     });
   }
   return res.json({ status: 'success', command: 'return "No pending commands"' });
@@ -65,7 +66,9 @@ app.post('/data-response', express.json(), (req, res) => {
 
     let message = '';
     if (playerId.startsWith('ServerList_')) {
-      serverList.set(metadata.serverId, data.result);
+      if (data?.result?.jobId) {
+        serverList.set(data.result.jobId, data.result);
+      }
       pendingRequests.delete(playerId);
       return res.json({ status: 'success' });
     }
@@ -84,7 +87,7 @@ app.post('/data-response', express.json(), (req, res) => {
       message = `📊 **Data for ${playerId}**\n\`\`\`diff\n`;
       for (const [key, value] of Object.entries(data?.result || {})) {
         const formattedValue = Array.isArray(value) ? value.join(', ') : 
-                             typeof value === 'object' ? JSON.stringify(value) : value;
+                           typeof value === 'object' ? JSON.stringify(value) : value;
         message += `${key}: ${formattedValue}\n`;
       }
       message += '```';
@@ -126,30 +129,31 @@ discordClient.on('messageCreate', async message => {
     if (command === '!getservers') {
       const requestId = `AllServers_${Date.now()}`;
       pendingRequests.set(requestId, message.channel);
-      
       serverList.clear();
 
       await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `return {
-          jobId = game.JobId,
-          players = game:GetService("Players"):GetPlayers(),
-          count = #game:GetService("Players"):GetPlayers(),
-          maxPlayers = game:GetService("Players").MaxPlayers
-        }`,
+        command: `local players = game:GetService("Players"):GetPlayers()
+          local names = {}
+          for _, p in ipairs(players) do table.insert(names, p.Name) end
+          return {
+            jobId = game.JobId,
+            players = names,
+            count = #players,
+            maxPlayers = game.Players.MaxPlayers
+          }`,
         playerId: `ServerList_${requestId}`
       }, { headers: { 'x-api-key': CONFIG.API_PASSCODE } });
 
-      setTimeout(async () => {
+      setTimeout(() => {
         if (serverList.size === 0) {
-          return message.reply('❌ No servers responded');
+          return message.channel.send('❌ No servers responded');
         }
 
         let messageContent = '🌐 **Active Servers**\n```\n';
         serverList.forEach((server, id) => {
           messageContent += `Server: ${id}\nPlayers: ${server.count}/${server.maxPlayers}\n`;
-          if (server.players && server.players.length > 0) {
-            const playerNames = server.players.map(p => p.Name).join(', ');
-            messageContent += `Players: ${playerNames}\n`;
+          if (server.players?.length > 0) {
+            messageContent += `Players: ${server.players.join(', ')}\n`;
           }
           messageContent += '----------------\n';
         });
@@ -173,12 +177,15 @@ discordClient.on('messageCreate', async message => {
       pendingRequests.set(requestId, message.channel);
 
       await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `return {
-          jobId = game.JobId,
-          players = game:GetService("Players"):GetPlayers(),
-          count = #game:GetService("Players"):GetPlayers(),
-          maxPlayers = game:GetService("Players").MaxPlayers
-        }`,
+        command: `local players = game:GetService("Players"):GetPlayers()
+          local names = {}
+          for _, p in ipairs(players) do table.insert(names, p.Name) end
+          return {
+            jobId = game.JobId,
+            players = names,
+            count = #players,
+            maxPlayers = game.Players.MaxPlayers
+          }`,
         playerId: requestId
       }, { headers: { 'x-api-key': CONFIG.API_PASSCODE } });
 
