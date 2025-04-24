@@ -144,7 +144,6 @@ discordClient.on('ready', () => {
 discordClient.on('messageCreate', async message => {
   if (message.author.bot) return;
 
-  try {
     if (!message.member?.permissions?.has('ADMINISTRATOR')) return;
 
     const args = message.content.split(' ');
@@ -335,7 +334,6 @@ discordClient.on('messageCreate', async message => {
         .setDescription(`Searching for player ${playerId}...`);
 
       await message.reply({ embeds: [embed] });
-    }
 
   }
 });
