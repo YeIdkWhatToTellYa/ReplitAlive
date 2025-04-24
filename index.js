@@ -231,12 +231,23 @@ discordClient.on('messageCreate', async message => {
       await message.reply({ embeds: [embed] });
     }
     else if (command === '!getservers') {
-      const serverKey = 'ServerList';
-      pendingRequests.set(serverKey, message.channel);
+      const requestId = `ServerList_${Date.now()}`;
+      pendingRequests.set(requestId, message.channel);
 
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `return game:GetService("DataStoreService"):GetDataStore("ServerData"):GetAsync("${serverKey}") or {}`,
-        playerId: serverKey
+        command: `local players = game:GetService("Players"):GetPlayers()
+          local playerNames = {}
+          for _, player in ipairs(players) do
+            table.insert(playerNames, player.Name)
+          end
+          return {
+            jobId = game.JobId,
+            players = playerNames,
+            count = #players,
+            maxPlayers = game.Players.MaxPlayers,
+            timestamp = os.time()
+          }`,
+        playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
@@ -247,8 +258,8 @@ discordClient.on('messageCreate', async message => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle('✅ Request Queued')
-        .setDescription(`Fetching server list...`)
+        .setTitle('✅ Server List Requested')
+        .setDescription('Fetching server information...')
         .setTimestamp();
 
       await message.reply({ embeds: [embed] });
@@ -263,12 +274,27 @@ discordClient.on('messageCreate', async message => {
         return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
       }
 
-      const serverKey = `ServerInfo_${serverId}`;
-      pendingRequests.set(serverKey, message.channel);
+      const requestId = `ServerInfo_${serverId}_${Date.now()}`;
+      pendingRequests.set(requestId, message.channel);
 
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `return game:GetService("DataStoreService"):GetDataStore("ServerData"):GetAsync("${serverKey}")`,
-        playerId: serverKey
+        command: `local players = game:GetService("Players"):GetPlayers()
+          local playerList = {}
+          for _, player in ipairs(players) do
+            table.insert(playerList, {
+              name = player.Name,
+              userId = player.UserId,
+              accountAge = player.AccountAge
+            })
+          end
+          return {
+            jobId = game.JobId,
+            players = playerList,
+            count = #players,
+            maxPlayers = game.Players.MaxPlayers,
+            timestamp = os.time()
+          }`,
+        playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
@@ -279,8 +305,8 @@ discordClient.on('messageCreate', async message => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle('✅ Request Queued')
-        .setDescription(`Fetching server info for **${serverId}**...`)
+        .setTitle('✅ Server Info Requested')
+        .setDescription(`Fetching info for server ${serverId}...`)
         .setTimestamp();
 
       await message.reply({ embeds: [embed] });
@@ -297,14 +323,16 @@ discordClient.on('messageCreate', async message => {
         return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
       }
 
-      const executeKey = `Execute_${Date.now()}`;
-      pendingRequests.set(executeKey, message.channel);
+      const requestId = `Execute_${Date.now()}`;
+      pendingRequests.set(requestId, message.channel);
 
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: serverId === '*' 
-          ? `return game:GetService("DataStoreService"):GetDataStore("ServerCommands"):SetAsync("Broadcast_${Date.now()}", "${cmd}")`
-          : `return game:GetService("DataStoreService"):GetDataStore("ServerCommands"):SetAsync("Server_${serverId}", "${cmd}")`,
-        playerId: executeKey
+        command: `local fn, err = loadstring([[${cmd}]])
+          if not fn then return {error = err} end
+          local success, result = pcall(fn)
+          if not success then return {error = result} end
+          return {result = result}`,
+        playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
@@ -315,10 +343,10 @@ discordClient.on('messageCreate', async message => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle('✅ Command Sent')
+        .setTitle('✅ Command Execution')
         .setDescription(serverId === '*' 
-          ? `Command broadcast to all servers:\n\`${cmd}\``
-          : `Command sent to server ${serverId}:\n\`${cmd}\``)
+          ? `Executing command on all servers:\n\`${cmd}\``
+          : `Executing command on server ${serverId}:\n\`${cmd}\``)
         .setTimestamp();
 
       await message.reply({ embeds: [embed] });
@@ -333,12 +361,28 @@ discordClient.on('messageCreate', async message => {
         return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
       }
 
-      const searchKey = `SearchPlayer_${playerId}`;
-      pendingRequests.set(searchKey, message.channel);
+      const requestId = `SearchPlayer_${playerId}_${Date.now()}`;
+      pendingRequests.set(requestId, message.channel);
 
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `return game:GetService("DataStoreService"):GetDataStore("PlayerTracking"):GetAsync("Player_${playerId}")`,
-        playerId: searchKey
+        command: `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
+          if player then
+            return {
+              found = true,
+              serverId = game.JobId,
+              playerName = player.Name,
+              userId = player.UserId,
+              accountAge = player.AccountAge,
+              timestamp = os.time()
+            }
+          else
+            return {
+              found = false,
+              message = "Player not found in this server",
+              timestamp = os.time()
+            }
+          end`,
+        playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
@@ -349,8 +393,8 @@ discordClient.on('messageCreate', async message => {
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle('✅ Search Started')
-        .setDescription(`Searching for player **${playerId}** across all servers...`)
+        .setTitle('✅ Player Search')
+        .setDescription(`Searching for player ${playerId}...`)
         .setTimestamp();
 
       await message.reply({ embeds: [embed] });
