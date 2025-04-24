@@ -168,11 +168,7 @@ discordClient.on('messageCreate', async message => {
 
   try {
     if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      const embed = new EmbedBuilder()
-        .setColor(0xff0000)
-        .setTitle('❌ Access Denied')
-        .setDescription('This command is restricted to administrators only.');
-      return message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 5000));
+      return
     }
 
     const args = message.content.split(' ');
