@@ -52,10 +52,7 @@ app.get('/', (req, res) => {
 });
 
 app.get('/get-command', (req, res) => {
-  console.log('\n[ROBLOX CLIENT REQUEST]');
-  
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
-    console.warn('Invalid API key');
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
@@ -66,23 +63,18 @@ app.get('/get-command', (req, res) => {
     res.json({
       status: 'success',
       command: nextCommand.command,
-      playerId: nextCommand.playerId,
-      timestamp: Date.now()
+      playerId: nextCommand.playerId
     });
   } else {
     res.json({
       status: 'success',
-      command: 'return "No pending commands"',
-      timestamp: Date.now()
+      command: 'return "No pending commands"'
     });
   }
 });
 
 app.post('/discord-command', (req, res) => {
-  console.log('\n[DISCORD BOT COMMAND]');
-  
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
-    console.warn('Invalid API key');
     return res.status(403).json({ error: 'Invalid API key' });
   }
 
@@ -91,20 +83,16 @@ app.post('/discord-command', (req, res) => {
     return res.status(400).json({ error: 'Missing command or playerId' });
   }
 
-  console.log(`Queuing command for ${playerId}:`, command);
   commandQueue.set(playerId, { command, playerId });
 
   res.json({
     status: 'success',
     message: 'Command queued for Roblox client',
-    playerId,
-    timestamp: Date.now()
+    playerId
   });
 });
 
 app.post('/data-response', express.json(), (req, res) => {
-  console.log('\n[DATA FROM ROBLOX] Raw:', JSON.stringify(req.body, null, 2));
-
   try {
     const { playerId, data, success, error, metadata } = req.body;
     if (!playerId) return res.status(400).json({ error: 'Missing playerId' });
@@ -114,31 +102,22 @@ app.post('/data-response', express.json(), (req, res) => {
 
     const playerData = data?.result || {};
 
-    const maxKeyLength = Math.max(...Object.keys(playerData).map(k => k.length), 10);
-
     let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
     for (const [key, value] of Object.entries(playerData)) {
-      const formattedValue = typeof value === 'boolean' 
-        ? (value ? '✅ true' : '❌ false')
-        : value;
+      let formattedValue = value;
+      if (Array.isArray(value)) {
+        formattedValue = value.join(', ');
+      } else if (typeof value === 'object' && value !== null) {
+        formattedValue = JSON.stringify(value);
+      }
       
       const changeIndicator = typeof value === 'number' 
         ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
         : ' ';
       
-      message += `${changeIndicator} ${key.padEnd(maxKeyLength)}: ${formattedValue}\n`;
+      message += `${changeIndicator} ${key}: ${formattedValue}\n`;
     }
     message += '```';
-
-    let timestampDisplay = 'N/A';
-    try {
-      if (metadata?.timestamp) {
-        const date = new Date(metadata.timestamp * 1000);
-        timestampDisplay = date.toISOString().replace('T', ' ').replace(/\..+/, '');
-      }
-    } catch (e) {
-      console.error('Timestamp formatting error:', e);
-    }
 
     const embed = new EmbedBuilder()
       .setColor(success === false ? 0xFF0000 : 0x00AE86)
@@ -146,7 +125,7 @@ app.post('/data-response', express.json(), (req, res) => {
         ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
         : message)
       .setFooter({ 
-        text: `Server: ${metadata?.serverId || 'N/A'} | ${timestampDisplay}` 
+        text: `Server: ${metadata?.serverId || 'N/A'}`
       });
 
     channel.send({ embeds: [embed] });
@@ -154,7 +133,6 @@ app.post('/data-response', express.json(), (req, res) => {
     res.json({ status: 'success' });
 
   } catch (err) {
-    console.error('Processing error:', err);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
@@ -167,9 +145,7 @@ discordClient.on('messageCreate', async message => {
   if (message.author.bot) return;
 
   try {
-    if (!message.member?.permissions?.has('ADMINISTRATOR')) {
-      return
-    }
+    if (!message.member?.permissions?.has('ADMINISTRATOR')) return;
 
     const args = message.content.split(' ');
     const command = args[0].toLowerCase();
@@ -187,46 +163,24 @@ discordClient.on('messageCreate', async message => {
       const playerKey = `Player_${playerId}`;
       pendingRequests.set(playerKey, message.channel);
 
-      const timeout = setTimeout(() => {
-        if (pendingRequests.has(playerKey)) {
-          pendingRequests.delete(playerKey);
-          const embed = new EmbedBuilder()
-            .setColor(0xffa500)
-            .setTitle('⌛ Timeout')
-            .setDescription(`Failed to fetch data for ${playerKey} within ${REQUEST_TIMEOUT/1000} seconds`)
-            .addFields({
-              name: 'Possible Causes',
-              value: '- Roblox server offline\n- Player not in game\n- Network issues',
-              inline: false
-            });
-          message.channel.send({ embeds: [embed] });
-        }
-      }, REQUEST_TIMEOUT);
-
       const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
         command: `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
         playerId: playerKey
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        timeout: 10000,
-        responseType: 'json'
+          'Content-Type': 'application/json'
+        }
       });
-
-      clearTimeout(timeout);
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Request Queued')
-        .setDescription(`Waiting for Roblox client to respond with data for **${playerKey}**`)
+        .setDescription(`Waiting for data for **${playerKey}**`)
         .addFields(
           { name: 'Status', value: 'Pending', inline: true },
           { name: 'Timeout', value: `${REQUEST_TIMEOUT/1000} seconds`, inline: true }
-        )
-        .setTimestamp();
+        );
 
       await message.reply({ embeds: [embed] });
     }
@@ -244,23 +198,20 @@ discordClient.on('messageCreate', async message => {
             jobId = game.JobId,
             players = playerNames,
             count = #players,
-            maxPlayers = game.Players.MaxPlayers,
-            timestamp = os.time()
+            maxPlayers = game.Players.MaxPlayers
           }`,
         playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         }
       });
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Server List Requested')
-        .setDescription('Fetching server information...')
-        .setTimestamp();
+        .setDescription('Fetching server information...');
 
       await message.reply({ embeds: [embed] });
     }
@@ -281,33 +232,26 @@ discordClient.on('messageCreate', async message => {
         command: `local players = game:GetService("Players"):GetPlayers()
           local playerList = {}
           for _, player in ipairs(players) do
-            table.insert(playerList, {
-              name = player.Name,
-              userId = player.UserId,
-              accountAge = player.AccountAge
-            })
+            table.insert(playerList, player.Name)
           end
           return {
             jobId = game.JobId,
             players = playerList,
             count = #players,
-            maxPlayers = game.Players.MaxPlayers,
-            timestamp = os.time()
+            maxPlayers = game.Players.MaxPlayers
           }`,
         playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         }
       });
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Server Info Requested')
-        .setDescription(`Fetching info for server ${serverId}...`)
-        .setTimestamp();
+        .setDescription(`Fetching info for server ${serverId}...`);
 
       await message.reply({ embeds: [embed] });
     }
@@ -336,8 +280,7 @@ discordClient.on('messageCreate', async message => {
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         }
       });
 
@@ -346,8 +289,7 @@ discordClient.on('messageCreate', async message => {
         .setTitle('✅ Command Execution')
         .setDescription(serverId === '*' 
           ? `Executing command on all servers:\n\`${cmd}\``
-          : `Executing command on server ${serverId}:\n\`${cmd}\``)
-        .setTimestamp();
+          : `Executing command on server ${serverId}:\n\`${cmd}\``);
 
       await message.reply({ embeds: [embed] });
     }
@@ -371,72 +313,39 @@ discordClient.on('messageCreate', async message => {
               found = true,
               serverId = game.JobId,
               playerName = player.Name,
-              userId = player.UserId,
-              accountAge = player.AccountAge,
-              timestamp = os.time()
+              userId = player.UserId
             }
           else
             return {
               found = false,
-              message = "Player not found in this server",
-              timestamp = os.time()
+              message = "Player not found in this server"
             }
           end`,
         playerId: requestId
       }, {
         headers: { 
           'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
+          'Content-Type': 'application/json'
         }
       });
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Player Search')
-        .setDescription(`Searching for player ${playerId}...`)
-        .setTimestamp();
+        .setDescription(`Searching for player ${playerId}...`);
 
       await message.reply({ embeds: [embed] });
     }
 
   } catch (err) {
-    console.error('Command error:', err);
-    
-    let errorMsg = 'An error occurred while processing your request.';
-    if (err.response) {
-      errorMsg += `\nStatus: ${err.response.status}`;
-      if (err.response.data) {
-        errorMsg += `\nResponse: ${JSON.stringify(err.response.data).substring(0, 100)}`;
-      }
-    } else {
-      errorMsg += `\nError: ${err.message}`;
-    }
-
     const embed = new EmbedBuilder()
       .setColor(0xff0000)
       .setTitle('⚠️ Error')
-      .setDescription(errorMsg)
-      .setTimestamp();
-
-    if (err.response) {
-      embed.addFields(
-        { name: 'Status Code', value: err.response.status.toString(), inline: true },
-        { name: 'Response', value: `\`\`\`${JSON.stringify(err.response.data).substring(0, 100)}\`\`\``, inline: true }
-      );
-    }
+      .setDescription(err.message);
 
     message.reply({ embeds: [embed] }).then(m => setTimeout(() => m.delete(), 10000));
   }
 });
 
-discordClient.login(CONFIG.DISCORD_TOKEN)
-  .then(() => console.log('🤖 Bot login successful'))
-  .catch(err => {
-    console.error('🔴 Discord login failed:', err.message);
-    process.exit(1);
-  });
-
-app.listen(CONFIG.PORT, () => {
-  console.log(`\n🚀 Server running on port ${CONFIG.PORT}`);
-});
+discordClient.login(CONFIG.DISCORD_TOKEN);
+app.listen(CONFIG.PORT);
