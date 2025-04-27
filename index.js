@@ -182,38 +182,77 @@ discordClient.on('messageCreate', async message => {
         );
 
       await message.reply({ embeds: [embed] });
-    }
-    else if (command === '!getservers') {
-      const requestId = `ServerList_${Date.now()}`;
-      pendingRequests.set(requestId, message.channel);
+    } else if (command === '!getservers') {
+    const requestId = `ServerList_${Date.now()}`;
+    pendingRequests.set(requestId, message.channel);
 
-      const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
-        command: `local players = game:GetService("Players"):GetPlayers()
-          local playerNames = {}
-          for _, player in ipairs(players) do
-            table.insert(playerNames, player.Name)
-          end
-          return {
-            jobId = game.JobId,
-            players = playerNames,
-            count = #players,
-            maxPlayers = game.Players.MaxPlayers
-          }`,
+    const getServersResponse = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: `local servers = {}
+            for _, server in ipairs(game:GetService("GameServerManager"):GetAllServers()) do
+                table.insert(servers, server.JobId)
+            end
+            return servers`,
         playerId: requestId
-      }, {
+    }, {
         headers: { 
-          'x-api-key': CONFIG.API_PASSCODE,
-          'Content-Type': 'application/json'
+            'x-api-key': CONFIG.API_PASSCODE,
+            'Content-Type': 'application/json'
         }
-      });
+    });
 
-      const embed = new EmbedBuilder()
+    const getServerDetailsCommand = `local servers = {}
+        for _, jobId in ipairs(${JSON.stringify(getServersResponse.data.data.result)}) do
+            local server = game:GetService("GameServerManager"):GetServerByJobId(jobId)
+            if server then
+                local players = server:GetPlayers()
+                local playerNames = {}
+                for _, player in ipairs(players) do
+                    table.insert(playerNames, player.Name)
+                end
+                table.insert(servers, {
+                    jobId = jobId,
+                    players = playerNames,
+                    count = #players,
+                    maxPlayers = server.Players.MaxPlayers,
+                    placeId = server.PlaceId,
+                    vipServerId = server.VIPServerId
+                })
+            end
+        end
+        return servers`;
+
+    const detailsResponse = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
+        command: getServerDetailsCommand,
+        playerId: requestId
+    }, {
+        headers: { 
+            'x-api-key': CONFIG.API_PASSCODE,
+            'Content-Type': 'application/json'
+        }
+    });
+
+    const servers = detailsResponse.data.data.result;
+
+    const embed = new EmbedBuilder()
         .setColor(0x00ff00)
-        .setTitle('✅ Server List Requested')
-        .setDescription('Fetching server information...');
+        .setTitle('🌐 Active Servers')
+        .setDescription(`Found ${servers.length} active servers`);
 
-      await message.reply({ embeds: [embed] });
-    }
+    servers.forEach(server => {
+        const playerList = server.players.length > 0 
+            ? server.players.join(', ')
+            : 'No players';
+        
+        embed.addFields({
+            name: `Server ${server.jobId} (${server.count}/${server.maxPlayers})`,
+            value: `Players: ${playerList}`,
+            inline: false
+        });
+    });
+
+    await message.reply({ embeds: [embed] });
+}
+      
     else if (command === '!getserverinfo') {
       const serverId = args[1];
       if (!serverId) {
