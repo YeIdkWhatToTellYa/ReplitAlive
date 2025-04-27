@@ -113,7 +113,7 @@ app.post('/data-response', express.json(), (req, res) => {
                 count: data?.result?.count || 0,
                 maxPlayers: data?.result?.maxPlayers || 0,
                 placeId: data?.result?.placeId,
-                vipServerId: data?.result?.vipServerId
+                isVipServer: data?.result?.isVipServer || false
             });
 
             setTimeout(() => {
@@ -131,8 +131,10 @@ app.post('/data-response', express.json(), (req, res) => {
                             ? server.players.join(', ')
                             : 'No players';
                         
+                        const serverType = server.isVipServer ? 'VIP' : 'Public';
+                        
                         embed.addFields({
-                            name: `Server ${server.jobId} (${server.count}/${server.maxPlayers})`,
+                            name: `Server ${server.jobId} (${server.count}/${server.maxPlayers}) [${serverType}]`,
                             value: `Players: ${playerList}`,
                             inline: false
                         });
@@ -171,7 +173,7 @@ app.post('/data-response', express.json(), (req, res) => {
                 ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
                 : message)
             .setFooter({ 
-                text: `Server: ${metadata?.serverId || 'N/A'}`
+                text: `Server: ${metadata?.serverId || 'N/A'} | VIP: ${metadata?.isVipServer ? 'Yes' : 'No'}`
             });
 
         channel.send({ embeds: [embed] });
@@ -242,7 +244,9 @@ discordClient.on('messageCreate', async message => {
           jobId = game.JobId,
           players = playerNames,
           count = #players,
-          maxPlayers = game.Players.MaxPlayers
+          maxPlayers = game.Players.MaxPlayers,
+          placeId = game.PlaceId,
+          isVipServer = game:GetService("Workspace"):FindFirstChild("VIP") ~= nil
         }`,
       playerId: requestId
     }, {
@@ -281,7 +285,9 @@ discordClient.on('messageCreate', async message => {
           jobId = game.JobId,
           players = playerList,
           count = #players,
-          maxPlayers = game.Players.MaxPlayers
+          maxPlayers = game.Players.MaxPlayers,
+          placeId = game.PlaceId,
+          isVipServer = game:GetService("Workspace"):FindFirstChild("VIP") ~= nil
         }`,
       playerId: requestId
     }, {
@@ -354,7 +360,8 @@ discordClient.on('messageCreate', async message => {
             found = true,
             serverId = game.JobId,
             playerName = player.Name,
-            userId = player.UserId
+            userId = player.UserId,
+            isVipServer = game:GetService("Workspace"):FindFirstChild("VIP") ~= nil
           }
         else
           return {
