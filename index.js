@@ -27,6 +27,7 @@ const discordClient = new Client({
 
 const commandQueue = new Map();
 const pendingRequests = new Map();
+const serverResponses = new Map();
 const REQUEST_TIMEOUT = 30000;
 
 app.use(express.json());
@@ -93,48 +94,98 @@ app.post('/discord-command', (req, res) => {
 });
 
 app.post('/data-response', express.json(), (req, res) => {
-  try {
-    const { playerId, data, success, error, metadata } = req.body;
-    if (!playerId) return res.status(400).json({ error: 'Missing playerId' });
+    try {
+        const { playerId, data, success, error, metadata } = req.body;
+        if (!playerId) return res.status(400).json({ error: 'Missing playerId' });
 
-    const channel = pendingRequests.get(playerId);
-    if (!channel) return res.status(200).json({ status: 'no pending request' });
+        const channel = pendingRequests.get(playerId);
+        if (!channel) return res.status(200).json({ status: 'no pending request' });
 
-    const playerData = data?.result || {};
+        // Handle server list responses differently
+        if (playerId.startsWith('ServerList_')) {
+            // Store the server data
+            if (!serverResponses.has(playerId)) {
+                serverResponses.set(playerId, []);
+            }
+            
+            const servers = serverResponses.get(playerId);
+            servers.push({
+                jobId: data?.result?.jobId,
+                players: data?.result?.players || [],
+                count: data?.result?.count || 0,
+                maxPlayers: data?.result?.maxPlayers || 0,
+                placeId: data?.result?.placeId,
+                vipServerId: data?.result?.vipServerId
+            });
 
-    let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
-    for (const [key, value] of Object.entries(playerData)) {
-      let formattedValue = value;
-      if (Array.isArray(value)) {
-        formattedValue = value.join(', ');
-      } else if (typeof value === 'object' && value !== null) {
-        formattedValue = JSON.stringify(value);
-      }
-      
-      const changeIndicator = typeof value === 'number' 
-        ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
-        : ' ';
-      
-      message += `${changeIndicator} ${key}: ${formattedValue}\n`;
+            // Wait for more responses or timeout
+            setTimeout(() => {
+                if (serverResponses.has(playerId)) {
+                    const allServers = serverResponses.get(playerId);
+                    serverResponses.delete(playerId);
+                    
+                    // Create an embed with all server information
+                    const embed = new EmbedBuilder()
+                        .setColor(0x00ff00)
+                        .setTitle('🌐 Active Servers')
+                        .setDescription(`Found ${allServers.length} active servers`);
+
+                    allServers.forEach(server => {
+                        const playerList = server.players.length > 0 
+                            ? server.players.join(', ')
+                            : 'No players';
+                        
+                        embed.addFields({
+                            name: `Server ${server.jobId} (${server.count}/${server.maxPlayers})`,
+                            value: `Players: ${playerList}`,
+                            inline: false
+                        });
+                    });
+
+                    channel.send({ embeds: [embed] });
+                    pendingRequests.delete(playerId);
+                }
+            }, 5000); // Wait 5 seconds for all responses
+            
+            return res.json({ status: 'success' });
+        }
+
+        // Original player data handling remains the same...
+        const playerData = data?.result || {};
+        
+        let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
+        for (const [key, value] of Object.entries(playerData)) {
+            let formattedValue = value;
+            if (Array.isArray(value)) {
+                formattedValue = value.join(', ');
+            } else if (typeof value === 'object' && value !== null) {
+                formattedValue = JSON.stringify(value);
+            }
+            
+            const changeIndicator = typeof value === 'number' 
+                ? (value > 0 ? '+' : value < 0 ? '-' : ' ')
+                : ' ';
+            
+            message += `${changeIndicator} ${key}: ${formattedValue}\n`;
+        }
+        message += '```';
+
+        const embed = new EmbedBuilder()
+            .setColor(success === false ? 0xFF0000 : 0x00AE86)
+            .setDescription(success === false 
+                ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
+                : message)
+            .setFooter({ 
+                text: `Server: ${metadata?.serverId || 'N/A'}`
+            });
+
+        channel.send({ embeds: [embed] });
+        pendingRequests.delete(playerId);
+        res.json({ status: 'success' });
+
+    } catch (err) {
+        res.status(500).json({ error: 'Internal server error' });
     }
-    message += '```';
-
-    const embed = new EmbedBuilder()
-      .setColor(success === false ? 0xFF0000 : 0x00AE86)
-      .setDescription(success === false 
-        ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
-        : message)
-      .setFooter({ 
-        text: `Server: ${metadata?.serverId || 'N/A'}`
-      });
-
-    channel.send({ embeds: [embed] });
-    pendingRequests.delete(playerId);
-    res.json({ status: 'success' });
-
-  } catch (err) {
-    res.status(500).json({ error: 'Internal server error' });
-  }
 });
 
 discordClient.on('ready', () => {
