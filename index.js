@@ -16,6 +16,7 @@ const CONFIG = {
   LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
+// Logging utility
 const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const currentLogLevel = LOG_LEVELS[CONFIG.LOG_LEVEL] || LOG_LEVELS.INFO;
 
@@ -34,6 +35,7 @@ function log(level, message, data = null) {
   }
 }
 
+// Validation
 function validateConfig() {
   const errors = [];
   
@@ -56,6 +58,7 @@ log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
 log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
 
+// Discord client setup
 const discordClient = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -64,12 +67,14 @@ const discordClient = new Client({
   ]
 });
 
+// State management
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
 
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -90,6 +95,7 @@ app.use((req, res, next) => {
   next();
 });
 
+// API key validation middleware
 function requireAuth(req, res, next) {
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
     log('WARN', 'Unauthorized API access attempt', { 
@@ -101,6 +107,7 @@ function requireAuth(req, res, next) {
   next();
 }
 
+// Utility functions
 function addToHistory(entry) {
   commandHistory.unshift({
     ...entry,
@@ -137,8 +144,10 @@ function cleanupExpiredRequests() {
   }
 }
 
+// Cleanup interval
 setInterval(cleanupExpiredRequests, 10000);
 
+// Routes
 app.get('/', (req, res) => {
   res.json({
     status: 'online',
@@ -269,7 +278,8 @@ app.post('/data-response', requireAuth, (req, res) => {
       success,
       serverId: metadata?.serverId 
     });
-    
+
+    // Handle server list aggregation
     if (playerId.startsWith('ServerList_')) {
       if (!serverResponses.has(playerId)) {
         serverResponses.set(playerId, []);
@@ -284,6 +294,8 @@ app.post('/data-response', requireAuth, (req, res) => {
         placeId: data?.result?.placeId,
         vipServerId: data?.result?.vipServerId
       });
+
+      // Wait for all servers to respond
       clearTimeout(request.collectionTimeout);
       request.collectionTimeout = setTimeout(() => {
         if (serverResponses.has(playerId)) {
@@ -320,6 +332,7 @@ app.post('/data-response', requireAuth, (req, res) => {
       return res.json({ status: 'success' });
     }
 
+    // Handle player search responses
     if (playerId.startsWith('SearchPlayer_')) {
       const result = data?.result;
       const embed = new EmbedBuilder()
@@ -346,6 +359,7 @@ app.post('/data-response', requireAuth, (req, res) => {
       return res.json({ status: 'success' });
     }
 
+    // Handle execute command responses
     if (playerId.startsWith('Execute_')) {
       const result = data?.result;
       const embed = new EmbedBuilder()
@@ -381,6 +395,7 @@ app.post('/data-response', requireAuth, (req, res) => {
       return res.json({ status: 'success' });
     }
 
+    // Handle standard data responses
     const playerData = data?.result || {};
     
     let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
@@ -449,6 +464,7 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
   });
 });
 
+// Discord event handlers
 discordClient.on('ready', () => {
   log('INFO', `Bot logged in as ${discordClient.user.tag}`);
   log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
@@ -464,6 +480,7 @@ discordClient.on('warn', warning => {
   log('WARN', 'Discord client warning', warning);
 });
 
+// Helper function for Discord commands
 async function queueRobloxCommand(channel, command, playerId) {
   pendingRequests.set(playerId, { 
     channel, 
@@ -495,6 +512,7 @@ async function queueRobloxCommand(channel, command, playerId) {
   }
 }
 
+// Discord message handler
 discordClient.on('messageCreate', async message => {
   if (message.author.bot) return;
 
@@ -673,6 +691,7 @@ discordClient.on('messageCreate', async message => {
   }
 });
 
+// Error handlers
 process.on('unhandledRejection', (reason, promise) => {
   log('ERROR', 'Unhandled Rejection', { reason, promise });
 });
@@ -682,6 +701,7 @@ process.on('uncaughtException', (error) => {
   process.exit(1);
 });
 
+// Graceful shutdown
 process.on('SIGINT', () => {
   log('INFO', 'Shutting down gracefully...');
   discordClient.destroy();
@@ -694,6 +714,7 @@ process.on('SIGTERM', () => {
   process.exit(0);
 });
 
+// Start services
 discordClient.login(CONFIG.DISCORD_TOKEN).catch(err => {
   log('ERROR', 'Failed to login to Discord', err);
   process.exit(1);
