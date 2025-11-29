@@ -562,7 +562,7 @@ discordClient.on('messageCreate', async message => {
       
       await queueRobloxCommand(
         message.channel,
-        `return game:GetService("DataStoreService"):GetDataStore("mainData"):GetAsync("${playerKey}")`,
+        `return game:GetService("DataStoreService"):GetDataStore("PlayerData"):GetAsync("${playerKey}")`,
         playerKey
       );
 
