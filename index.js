@@ -193,19 +193,22 @@ app.get('/get-command', requireAuth, (req, res) => {
     
     log('INFO', 'Command retrieved from queue', { 
       playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId,
       queueRemaining: commandQueue.size 
     });
     
     addToHistory({
       type: 'command_retrieved',
       playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId,
       success: true
     });
     
     res.json({
       status: 'success',
       command: nextCommand.command,
-      playerId: nextCommand.playerId
+      playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId
     });
   } else {
     res.json({
@@ -216,7 +219,7 @@ app.get('/get-command', requireAuth, (req, res) => {
 });
 
 app.post('/discord-command', requireAuth, (req, res) => {
-  const { command, playerId } = req.body;
+  const { command, playerId, targetJobId } = req.body;
   
   if (!command || !playerId) {
     log('WARN', 'Invalid command request', { command, playerId });
@@ -235,17 +238,20 @@ app.post('/discord-command', requireAuth, (req, res) => {
   commandQueue.set(playerId, { 
     command, 
     playerId,
+    targetJobId: targetJobId || '*',
     queuedAt: Date.now()
   });
   
   log('INFO', 'Command queued', { 
     playerId, 
+    targetJobId: targetJobId || '*',
     queueSize: commandQueue.size 
   });
   
   addToHistory({
     type: 'command_queued',
     playerId,
+    targetJobId: targetJobId || '*',
     commandPreview: command.substring(0, 50),
     success: true
   });
@@ -254,6 +260,7 @@ app.post('/discord-command', requireAuth, (req, res) => {
     status: 'success',
     message: 'Command queued for Roblox client',
     playerId,
+    targetJobId: targetJobId || '*',
     queuePosition: commandQueue.size
   });
 });
@@ -481,7 +488,7 @@ discordClient.on('warn', warning => {
 });
 
 // Helper function for Discord commands
-async function queueRobloxCommand(channel, command, playerId) {
+async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
   pendingRequests.set(playerId, { 
     channel, 
     createdAt: Date.now() 
@@ -490,7 +497,8 @@ async function queueRobloxCommand(channel, command, playerId) {
   try {
     const response = await axios.post(`${CONFIG.SERVER_URL}/discord-command`, {
       command,
-      playerId
+      playerId,
+      targetJobId
     }, {
       headers: { 
         'x-api-key': CONFIG.API_PASSCODE,
@@ -499,11 +507,16 @@ async function queueRobloxCommand(channel, command, playerId) {
       timeout: 5000
     });
 
-    log('DEBUG', 'Command queued successfully', { playerId, response: response.data });
+    log('DEBUG', 'Command queued successfully', { 
+      playerId, 
+      targetJobId,
+      response: response.data 
+    });
     return response.data;
   } catch (err) {
     log('ERROR', 'Failed to queue command', { 
-      playerId, 
+      playerId,
+      targetJobId,
       error: err.message 
     });
     
@@ -593,15 +606,16 @@ discordClient.on('messageCreate', async message => {
       await message.reply({ embeds: [embed] });
 
     } else if (command === '!execute') {
-      const cmd = args.slice(1).join(' ');
+      const serverId = args[1];
+      const cmd = args.slice(2).join(' ');
       
-      if (!cmd) {
+      if (!serverId || !cmd) {
         const embed = new EmbedBuilder()
           .setColor(0xffa500)
           .setTitle('ℹ️ Usage')
-          .setDescription('`!execute <lua_command>`\n\nExample: `!execute print("Hello")`');
+          .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
         return message.reply({ embeds: [embed] })
-          .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+          .then(m => setTimeout(() => m.delete().catch(() => {}), 8000));
       }
 
       const requestId = `Execute_${Date.now()}`;
@@ -613,13 +627,17 @@ discordClient.on('messageCreate', async message => {
           local success, result = pcall(fn)
           if not success then return {error = result} end
           return {result = result}`,
-        requestId
+        requestId,
+        serverId
       );
 
       const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Command Queued')
-        .setDescription(`Executing on all servers:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``);
+        .setDescription(serverId === '*' 
+          ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
+          : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
+        .setFooter({ text: serverId === '*' ? 'All servers will execute this command' : `Target: ${serverId}` });
 
       await message.reply({ embeds: [embed] });
 
@@ -667,7 +685,7 @@ discordClient.on('messageCreate', async message => {
         .addFields(
           { name: '!getdata <playerId>', value: 'Fetch player data from DataStore', inline: false },
           { name: '!getservers', value: 'List all active game servers', inline: false },
-          { name: '!execute <lua_code>', value: 'Execute Lua code on all servers', inline: false },
+          { name: '!execute <jobId|*> <lua_code>', value: 'Execute Lua code on specific server or all servers (*)', inline: false },
           { name: '!searchforplayer <playerId>', value: 'Find which server a player is on', inline: false },
           { name: '!help', value: 'Show this help message', inline: false }
         )
