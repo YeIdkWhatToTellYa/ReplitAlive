@@ -317,18 +317,12 @@ app.post('/data-response', requireAuth, (req, res) => {
             .setDescription(`Found ${allServers.length} server(s) with ${totalPlayers} total player(s)`);
 
           allServers.forEach((server, index) => {
-            // Show the full JobId by default; truncate with ellipsis only if very long
-            const rawJobId = server.jobId || 'unknown';
-            const displayJobId = (typeof rawJobId === 'string' && rawJobId.length > 20)
-              ? `${rawJobId.substring(0, 20)}...`
-              : rawJobId;
-
             const playerList = server.players.length > 0 
               ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
               : 'No players';
             
             embed.addFields({
-              name: `Server ${index + 1}: ${displayJobId} (${server.count}/${server.maxPlayers})`,
+              name: `Server ${index + 1}: ${server.jobId.substring(0, 8)}... (${server.count}/${server.maxPlayers})`,
               value: `Players: ${playerList}`,
               inline: false
             });
@@ -618,7 +612,7 @@ discordClient.on('messageCreate', async message => {
         const embed = new EmbedBuilder()
           .setColor(0xffa500)
           .setTitle('ℹ️ Usage')
-          .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all[...]
+          .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
         return message.reply({ embeds: [embed] })
           .then(m => setTimeout(() => m.delete().catch(() => {}), 8000));
       }
