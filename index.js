@@ -596,13 +596,7 @@ discordClient.on('messageCreate', async message => {
         requestId
       );
 
-      const embed = new EmbedBuilder()
-        .setColor(0x00ff00)
-        .setTitle('✅ Server List Requested')
-        .setDescription('Gathering information from all active servers...')
-        .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY/1000} seconds` });
-
-      await message.reply({ embeds: [embed] });
+      await message.reply(`✅ **Server List Requested**\nGathering information from all active servers...\nThis may take ${CONFIG.RESPONSE_COLLECTION_DELAY/1000} seconds`);
 
     } else if (command === '!execute') {
       const serverId = args[1];
