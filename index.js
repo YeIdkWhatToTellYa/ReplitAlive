@@ -369,32 +369,31 @@ app.post('/data-response', requireAuth, (req, res) => {
     // Handle execute command responses
     if (playerId.startsWith('Execute_')) {
       const result = data?.result;
-      const embed = new EmbedBuilder()
-        .setColor(success === false ? 0xFF0000 : 0x00AE86);
-
+      
+      let responseText = '';
+      
       if (success === false) {
-        embed
-          .setTitle('❌ Execution Error')
-          .setDescription(`\`\`\`${error}\`\`\``);
+        responseText = `**❌ Execution Error**\n\`\`\`\n${error}\n\`\`\``;
       } else {
-        let resultText = 'Command executed successfully';
-        
-        if (result) {
+        if (result !== undefined && result !== null) {
           if (typeof result === 'object') {
-            resultText = `\`\`\`json\n${JSON.stringify(result, null, 2)}\`\`\``;
+            responseText = `**✅ Execution Success**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
           } else {
-            resultText = `\`\`\`\n${String(result)}\`\`\``;
+            responseText = `**✅ Execution Success**\n\`\`\`\n${String(result)}\n\`\`\``;
           }
+        } else {
+          responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
         }
         
-        embed
-          .setTitle('✅ Execution Success')
-          .setDescription(resultText.substring(0, 4000));
+        responseText += `\nServer: \`${metadata?.serverId || 'N/A'}\``;
       }
 
-      embed.setFooter({ text: `Server: ${metadata?.serverId?.substring(0, 16) || 'N/A'}` });
+      // Split message if too long (Discord has 2000 char limit)
+      if (responseText.length > 1900) {
+        responseText = responseText.substring(0, 1900) + '...\n```\n(Output truncated)';
+      }
 
-      request.channel.send({ embeds: [embed] }).catch(err =>
+      request.channel.send(responseText).catch(err =>
         log('ERROR', 'Failed to send execution result', err)
       );
       
