@@ -130,7 +130,7 @@ function cleanupExpiredRequests() {
       if (value.channel) {
         const embed = new EmbedBuilder()
           .setColor(0xFF0000)
-          .setTitle('⏱️ Request Timeout')
+          .setTitle(⏱️ Request Timeout')
           .setDescription(`Request **${key}** timed out after ${timeout/1000} seconds`)
           .setFooter({ text: 'The Roblox server may be offline or unresponsive' });
         
@@ -507,7 +507,8 @@ discordClient.on('warn', warning => {
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
   pendingRequests.set(playerId, { 
     channel, 
-    createdAt: Date.now() 
+    createdAt: Date.now(),
+    targetJobId
   });
 
   try {
