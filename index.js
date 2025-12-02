@@ -280,8 +280,6 @@ app.post('/data-response', requireAuth, (req, res) => {
       serverId: metadata?.serverId
     });
 
-    // Handle server list aggregation
-    // Handle server list aggregation
     if (playerId.startsWith('ServerList_')) {
       if (!serverResponses.has(playerId)) {
         serverResponses.set(playerId, []);
@@ -633,7 +631,7 @@ discordClient.on('messageCreate', async message => {
 
       await queueRobloxCommand(
         message.channel,
-        `require(game.ServerScriptService.ExternalCommands.Loadstring)()`,
+        command,
         requestId,
         serverId
       );
