@@ -188,44 +188,51 @@ app.get('/health', (req, res) => {
 app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
-  if (nextCommand) {
-    const isBroadcast = nextCommand.targetJobId === '*';
-    
-    if (!isBroadcast) {
-      commandQueue.delete(nextCommand.playerId);
-      log('INFO', 'Single-target command delivered', { 
-        playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
-      });
-    } else {
-      setTimeout(() => {
-        if (commandQueue.has(nextCommand.playerId)) {
-          commandQueue.delete(nextCommand.playerId);
-          log('INFO', 'Broadcast command auto-cleared (stale)', { 
-            playerId: nextCommand.playerId 
-          });
-        }
-      }, 30000);
-      
-      log('INFO', 'Broadcast command delivered (stays in queue)', { 
-        playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
-      });
-    }
-    
-    res.json({
-      status: 'success',
-      command: nextCommand.command,
-      playerId: nextCommand.playerId,
-      targetJobId: nextCommand.targetJobId
-    });
-  } else {
-    res.json({
+  if (!nextCommand) {
+    return res.json({
       status: 'success',
       command: 'return "No pending commands"'
     });
   }
+
+  const isBroadcast = nextCommand.targetJobId === '*';
+  
+  if (isBroadcast && !nextCommand.receivedBy) {
+    nextCommand.receivedBy = new Set();
+  }
+  
+  const serverJobId = req.query.serverJobId || 'unknown';
+  
+  if (isBroadcast) {
+    if (nextCommand.receivedBy.has(serverJobId)) {
+      return res.json({
+        status: 'success',
+        command: 'return "Command already processed by this server"'
+      });
+    }
+    nextCommand.receivedBy.add(serverJobId);
+    
+    log('INFO', 'Broadcast delivered to server', {
+      playerId: nextCommand.playerId,
+      serverJobId,
+      totalServers: nextCommand.receivedBy.size
+    });
+  } else {
+    commandQueue.delete(nextCommand.playerId);
+    log('INFO', 'Single-target command delivered', {
+      playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId
+    });
+  }
+  
+  res.json({
+    status: 'success',
+    command: nextCommand.command,
+    playerId: nextCommand.playerId,
+    targetJobId: nextCommand.targetJobId
+  });
 });
+
 
 
 
@@ -298,9 +305,11 @@ app.post('/data-response', requireAuth, (req, res) => {
     });
 
     if (playerId.startsWith('ServerList_')) {
-      if (!serverResponses.has(playerId)) {
-        serverResponses.set(playerId, []);
-      }
+      log('INFO', 'ServerList response received', {
+        playerId,
+        serverId: metadata?.serverId,
+        serverResponses: serverResponses.get(playerId)?.length || 0
+      });
 
       const servers = serverResponses.get(playerId);
       servers.push({
