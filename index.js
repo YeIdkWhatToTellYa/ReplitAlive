@@ -189,14 +189,9 @@ app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
   if (nextCommand) {
-    setTimeout(() => {
-      if (commandQueue.has(nextCommand.playerId)) {
-        commandQueue.delete(nextCommand.playerId);
-        log('INFO', 'Auto-cleared stale command', { playerId: nextCommand.playerId });
-      }
-    }, 30000);
-
-    log('INFO', 'Command retrieved from queue', { 
+    commandQueue.delete(nextCommand.playerId);
+    
+    log('INFO', 'Command delivered and removed from queue', { 
       playerId: nextCommand.playerId,
       targetJobId: nextCommand.targetJobId
     });
@@ -214,6 +209,7 @@ app.get('/get-command', requireAuth, (req, res) => {
     });
   }
 });
+
 
 
 app.post('/discord-command', requireAuth, (req, res) => {
