@@ -189,7 +189,8 @@ app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
   if (nextCommand) {
-    commandQueue.delete(nextCommand.playerId);
+    // DON'T immediately delete - let all servers process it
+    // commandQueue.delete(nextCommand.playerId);
     
     log('INFO', 'Command retrieved from queue', { 
       playerId: nextCommand.playerId,
@@ -321,8 +322,11 @@ app.post('/data-response', requireAuth, (req, res) => {
               ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
               : 'No players';
             
+            // Truncate jobId to fit Discord field limits
+            const jobIdDisplay = server.jobId.length > 16 ? server.jobId.substring(0, 16) + '...' : server.jobId;
+            
             embed.addFields({
-              name: `Server ${index + 1}: ${server.jobId.substring(0, 8)}... (${server.count}/${server.maxPlayers})`,
+              name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
               value: `Players: ${playerList}`,
               inline: false
             });
@@ -346,11 +350,13 @@ app.post('/data-response', requireAuth, (req, res) => {
         .setColor(result?.found ? 0x00ff00 : 0xFF9900);
 
       if (result?.found) {
+        const jobIdDisplay = result.serverId.length > 32 ? result.serverId.substring(0, 32) + '...' : result.serverId;
+        
         embed
           .setTitle('✅ Player Found')
           .setDescription(`**${result.playerName}** (${result.userId})`)
           .addFields(
-            { name: 'Server ID', value: result.serverId.substring(0, 16) + '...', inline: true }
+            { name: 'Server ID', value: `\`${jobIdDisplay}\``, inline: true }
           );
       } else {
         embed
@@ -385,7 +391,8 @@ app.post('/data-response', requireAuth, (req, res) => {
           responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
         }
         
-        responseText += `\nServer: \`${metadata?.serverId || 'N/A'}\``;
+        const serverIdDisplay = metadata?.serverId?.length > 32 ? metadata.serverId.substring(0, 32) + '...' : (metadata?.serverId || 'N/A');
+        responseText += `\nServer: \`${serverIdDisplay}\``;
       }
 
       // Split message if too long (Discord has 2000 char limit)
@@ -434,7 +441,7 @@ app.post('/data-response', requireAuth, (req, res) => {
         ? `❌ **Error**\n\`\`\`${error}\`\`\`` 
         : message)
       .setFooter({ 
-        text: `Server: ${metadata?.serverId?.substring(0, 16) || 'N/A'}`
+        text: `Server: ${metadata?.serverId?.substring(0, 32) || 'N/A'}`
       });
 
     request.channel.send({ embeds: [embed] }).catch(err =>
@@ -593,7 +600,8 @@ discordClient.on('messageCreate', async message => {
             maxPlayers = game.Players.MaxPlayers,
             placeId = game.PlaceId
           }`,
-        requestId
+        requestId,
+        '*'
       );
 
       const embed = new EmbedBuilder()
@@ -666,7 +674,8 @@ discordClient.on('messageCreate', async message => {
           else
             return {found = false}
           end`,
-        requestId
+        requestId,
+        '*'
       );
 
       const embed = new EmbedBuilder()
