@@ -631,7 +631,7 @@ discordClient.on('messageCreate', async message => {
 
       await queueRobloxCommand(
         message.channel,
-        command,
+        cmd,
         requestId,
         serverId
       );
