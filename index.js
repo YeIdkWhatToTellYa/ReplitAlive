@@ -632,75 +632,35 @@ discordClient.on('messageCreate', async message => {
       await message.reply({ embeds: [embed] });
 
     } else if (command === '!execute') {
-      const serverId = args[1];
-      const cmd = args.slice(2).join(' ');
+  const serverId = args[1];
+  const cmd = args.slice(2).join(' ');
+  
+  if (!serverId || !cmd) { /* usage */ }
 
-      if (!serverId || !cmd) {
-        const embed = new EmbedBuilder()
-          .setColor(0xffa500)
-          .setTitle('ℹ️ Usage')
-          .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
-        return message.reply({ embeds: [embed] })
-          .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
-      }
+  const requestId = `Execute_${Date.now()}`;
+  
+  const escapedCmd = cmd.replace(/'/g, "\\'");  // Escape Discord user's single quotes
 
-      const requestId = `Execute_${Date.now()}`;
+  await queueRobloxCommand(
+    message.channel,
+    `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
+      if not fn then return {error = err} end
+      local success, result = pcall(fn)
+      if not success then return {error = result} end
+      return {result = result}`,
+    requestId,
+    serverId
+  );
 
-      await queueRobloxCommand(
-        message.channel,
-        cmds,
-        requestId,
-        serverId
-      );
-
-      const embed = new EmbedBuilder()
-        .setColor(0x00ff00)
-        .setTitle('✅ Command Queued')
-        .setDescription(serverId === '*'
-          ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
-          : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
-        .setFooter({ text: serverId === '*' ? 'All servers will execute this command' : `Target: ${serverId}` });
-
-      await message.reply({ embeds: [embed] });
-
-    } else if (command === '!searchforplayer') {
-      const playerId = args[1]?.match(/\d+/)?.[0];
-      if (!playerId) {
-        const embed = new EmbedBuilder()
-          .setColor(0xffa500)
-          .setTitle('ℹ️ Usage')
-          .setDescription('`!searchforplayer <playerId>`\n\nExample: `!searchforplayer 123456789`');
-        return message.reply({ embeds: [embed] })
-          .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
-      }
-
-      const requestId = `SearchPlayer_${playerId}_${Date.now()}`;
-
-      await queueRobloxCommand(
-        message.channel,
-        `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
-          if player then
-            return {
-              found = true,
-              serverId = game.JobId,
-              playerName = player.Name,
-              userId = player.UserId
-            }
-          else
-            return {found = false}
-          end`,
-        requestId,
-        '*'
-      );
-
-      const embed = new EmbedBuilder()
+  
+  const embed = new EmbedBuilder()
         .setColor(0x00ff00)
         .setTitle('✅ Search Started')
         .setDescription(`Searching for player **${playerId}** across all servers...`);
 
       await message.reply({ embeds: [embed] });
 
-    } else if (command === '!help') {
+} else if (command === '!help') {
       const embed = new EmbedBuilder()
         .setColor(0x0099ff)
         .setTitle('🤖 Bot Commands')
