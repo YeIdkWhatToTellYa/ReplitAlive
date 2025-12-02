@@ -129,10 +129,11 @@ function cleanupExpiredRequests() {
       
       if (value.channel) {
         const embed = new EmbedBuilder()
-          .setColor(0xFF0000)
-          .setTitle(⏱️ Request Timeout')
-          .setDescription(`Request **${key}** timed out after ${timeout/1000} seconds`)
-          .setFooter({ text: 'The Roblox server may be offline or unresponsive' });
+  	.setColor(0xFF0000)
+  	.setTitle('⏱️ Request Timeout')  // ✅ Fixed
+ 	 .setDescription(`Request **${key}** timed out after ${timeout/1000} seconds`)
+  	.setFooter({ text: 'The Roblox server may be offline or unresponsive' });
+
         
         value.channel.send({ embeds: [embed] }).catch(err => 
           log('ERROR', 'Failed to send timeout message', err)
