@@ -280,68 +280,69 @@ app.post('/data-response', requireAuth, (req, res) => {
       serverId: metadata?.serverId
     });
 
-    if (playerId.startsWith('ServerList_')) {
-      if (!serverResponses.has(playerId)) {
-        serverResponses.set(playerId, []);
+    // Handle server list aggregation
+if (playerId.startsWith('ServerList_')) {
+  if (!serverResponses.has(playerId)) {
+    serverResponses.set(playerId, []);
+  }
+  
+  const servers = serverResponses.get(playerId);
+  servers.push({
+    jobId: data?.result?.jobId || 'unknown',
+    players: data?.result?.players || [],
+    count: data?.result?.count || 0,
+    maxPlayers: data?.result?.maxPlayers || 0,
+    placeId: data?.result?.placeId,
+    vipServerId: data?.result?.vipServerId
+  });
+
+  clearTimeout(request.collectionTimeout);
+  request.collectionTimeout = setTimeout(() => {
+    if (serverResponses.has(playerId)) {
+      const allServers = serverResponses.get(playerId);
+      serverResponses.delete(playerId);
+
+      const uniqueServers = [];
+      const seenJobIds = new Set();
+      for (const s of allServers) {
+        const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
+        if (!seenJobIds.has(jobId)) {
+          uniqueServers.push(s);
+          seenJobIds.add(jobId);
+        }
       }
 
-      const servers = serverResponses.get(playerId);
-      servers.push({
-        jobId: data?.result?.jobId || 'unknown',
-        players: data?.result?.players || [],
-        count: data?.result?.count || 0,
-        maxPlayers: data?.result?.maxPlayers || 0,
-        placeId: data?.result?.placeId,
-        vipServerId: data?.result?.vipServerId
+      const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
+      
+      const embed = new EmbedBuilder()
+        .setColor(0x00ff00)
+        .setTitle('🌐 Active Servers')
+        .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
+
+      uniqueServers.forEach((server, index) => {
+        const playerList = server.players.length > 0 
+          ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
+          : 'No players';
+
+        const jobIdDisplay = server.jobId || 'unknown';
+        
+        embed.addFields({
+          name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
+          value: `Players: ${playerList}`,
+          inline: false
+        });
       });
 
-      clearTimeout(request.collectionTimeout);
-      request.collectionTimeout = setTimeout(() => {
-        if (serverResponses.has(playerId)) {
-          const allServers = serverResponses.get(playerId);
-          serverResponses.delete(playerId);
-
-          const uniqueServers = [];
-          const seenJobIds = new Set();
-          for (const s of allServers) {
-            const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
-            if (!seenJobIds.has(jobId)) {
-              uniqueServers.push(s);
-              seenJobIds.add(jobId);
-            }
-          }
-
-          const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
-
-          const embed = new EmbedBuilder()
-            .setColor(0x00ff00)
-            .setTitle('🌐 Active Servers')
-            .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
-
-          uniqueServers.forEach((server, index) => {
-            const playerList = server.players.length > 0
-              ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
-              : 'No players';
-
-            const jobIdDisplay = server.jobId || 'unknown';
-
-            embed.addFields({
-              name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
-              value: `Players: ${playerList}`,
-              inline: false
-            });
-          });
-
-          request.channel.send({ embeds: [embed] }).catch(err =>
-            log('ERROR', 'Failed to send server list', err)
-          );
-
-          pendingRequests.delete(playerId);
-        }
-      }, CONFIG.RESPONSE_COLLECTION_DELAY);
-
-      return res.json({ status: 'success' });
+      request.channel.send({ embeds: [embed] }).catch(err =>
+        log('ERROR', 'Failed to send server list', err)
+      );
+      
+      pendingRequests.delete(playerId);
     }
+  }, CONFIG.RESPONSE_COLLECTION_DELAY);
+  
+  return res.json({ status: 'success' });
+}
 
 
     // Handle player search responses
