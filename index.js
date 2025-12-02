@@ -652,30 +652,35 @@ discordClient.on('messageCreate', async message => {
   const serverId = args[1];
   const cmd = args.slice(2).join(' ');
   
-  if (!serverId || !cmd) { /* usage */ }
+    if (!serverId || !cmd) {
+      const embed = new EmbedBuilder()
+            .setColor(0xffa500)
+            .setTitle('ℹ️ Usage')
+            .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
+          return message.reply({ embeds: [embed] })
+            .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
+    }
 
-  const requestId = `Execute_${Date.now()}`;
-  
-  const escapedCmd = cmd.replace(/'/g, "\\'");  // Escape Discord user's single quotes
+    const requestId = `Execute_${Date.now()}`;
+    const escapedCmd = cmd.replace(/'/g, "\\'").replace(/"/g, '\\"');
+    
+    await queueRobloxCommand(
+      message.channel,
+      `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
+        if not fn then return {error = err} end
+        local success, result = pcall(fn)
+        if not success then return {error = result} end
+        return {result = result}`,
+      requestId,
+      serverId
+    );
+      
+    const embed = new EmbedBuilder()
+              .setColor(0x00ff00)
+              .setTitle('✅ Search Started')
+              .setDescription(`Searching for player **${playerId}** across all servers...`);
 
-  await queueRobloxCommand(
-    message.channel,
-    `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
-      if not fn then return {error = err} end
-      local success, result = pcall(fn)
-      if not success then return {error = result} end
-      return {result = result}`,
-    requestId,
-    serverId
-  );
-
-  
-  const embed = new EmbedBuilder()
-        .setColor(0x00ff00)
-        .setTitle('✅ Search Started')
-        .setDescription(`Searching for player **${playerId}** across all servers...`);
-
-      await message.reply({ embeds: [embed] });
+            await message.reply({ embeds: [embed] });
 
 } else if (command === '!help') {
       const embed = new EmbedBuilder()
