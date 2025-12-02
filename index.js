@@ -304,13 +304,18 @@ app.post('/data-response', requireAuth, (req, res) => {
       serverId: metadata?.serverId
     });
 
+    // Handle server list aggregation
     if (playerId.startsWith('ServerList_')) {
       log('INFO', 'ServerList response received', {
         playerId,
         serverId: metadata?.serverId,
-        serverResponses: serverResponses.get(playerId)?.length || 0
+        serversSoFar: serverResponses.has(playerId) ? serverResponses.get(playerId).length : 0
       });
 
+      if (!serverResponses.has(playerId)) {
+        serverResponses.set(playerId, []);
+      }
+      
       const servers = serverResponses.get(playerId);
       servers.push({
         jobId: data?.result?.jobId || 'unknown',
@@ -323,51 +328,54 @@ app.post('/data-response', requireAuth, (req, res) => {
 
       clearTimeout(request.collectionTimeout);
       request.collectionTimeout = setTimeout(() => {
-        if (serverResponses.has(playerId)) {
-          const allServers = serverResponses.get(playerId);
-          serverResponses.delete(playerId);
+        const allServers = serverResponses.get(playerId) || [];
+        serverResponses.delete(playerId);
 
-          const uniqueServers = [];
-          const seenJobIds = new Set();
-          for (const s of allServers) {
-            const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
-            if (!seenJobIds.has(jobId)) {
-              uniqueServers.push(s);
-              seenJobIds.add(jobId);
-            }
+        const uniqueServers = [];
+        const seenJobIds = new Set();
+        for (const s of allServers) {
+          const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
+          if (!seenJobIds.has(jobId)) {
+            uniqueServers.push(s);
+            seenJobIds.add(jobId);
           }
+        }
 
-          const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
+        const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
+        
+        const embed = new EmbedBuilder()
+          .setColor(0x00ff00)
+          .setTitle('🌐 Active Servers')
+          .setDescription(`**Results after 10s** (${uniqueServers.length} server(s), ${totalPlayers} players total)`);
 
-          const embed = new EmbedBuilder()
-            .setColor(0x00ff00)
-            .setTitle('🌐 Active Servers')
-            .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
-
+        if (uniqueServers.length === 0) {
+          embed.setDescription('**No servers responded within 10 seconds**');
+        } else {
           uniqueServers.forEach((server, index) => {
-            const playerList = server.players.length > 0
+            const playerList = server.players.length > 0 
               ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
               : 'No players';
 
-            const jobIdDisplay = server.jobId || 'unknown';
-
+            const jobIdDisplay = server.jobId?.substring(0, 16) + '...' || 'unknown';
+            
             embed.addFields({
               name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
-              value: `Players: ${playerList}`,
+              value: `**Players:** ${playerList}`,
               inline: false
             });
           });
-
-          request.channel.send({ embeds: [embed] }).catch(err =>
-            log('ERROR', 'Failed to send server list', err)
-          );
-
-          pendingRequests.delete(playerId);
         }
-      }, CONFIG.RESPONSE_COLLECTION_DELAY);
 
+        request.channel.send({ embeds: [embed] }).catch(err =>
+          log('ERROR', 'Failed to send server list', err)
+        );
+        
+        pendingRequests.delete(playerId);
+      }, 10000);
+      
       return res.json({ status: 'success' });
     }
+
 
 
     // Handle player search responses
