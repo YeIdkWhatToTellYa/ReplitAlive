@@ -129,11 +129,10 @@ function cleanupExpiredRequests() {
       
       if (value.channel) {
         const embed = new EmbedBuilder()
-  	.setColor(0xFF0000)
-  	.setTitle('⏱️ Request Timeout')  // ✅ Fixed
- 	 .setDescription(`Request **${key}** timed out after ${timeout/1000} seconds`)
-  	.setFooter({ text: 'The Roblox server may be offline or unresponsive' });
-
+          .setColor(0xFF0000)
+          .setTitle('⏱️ Request Timeout')
+          .setDescription(`Request **${key}** timed out after ${timeout/1000} seconds`)
+          .setFooter({ text: 'The Roblox server may be offline or unresponsive' });
         
         value.channel.send({ embeds: [embed] }).catch(err => 
           log('ERROR', 'Failed to send timeout message', err)
@@ -190,20 +189,16 @@ app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
   if (nextCommand) {
-    // DON'T immediately delete - let all servers process it
-    // commandQueue.delete(nextCommand.playerId);
-    
+    setTimeout(() => {
+      if (commandQueue.has(nextCommand.playerId)) {
+        commandQueue.delete(nextCommand.playerId);
+        log('INFO', 'Auto-cleared stale command', { playerId: nextCommand.playerId });
+      }
+    }, 30000);
+
     log('INFO', 'Command retrieved from queue', { 
       playerId: nextCommand.playerId,
-      targetJobId: nextCommand.targetJobId,
-      queueRemaining: commandQueue.size 
-    });
-    
-    addToHistory({
-      type: 'command_retrieved',
-      playerId: nextCommand.playerId,
-      targetJobId: nextCommand.targetJobId,
-      success: true
+      targetJobId: nextCommand.targetJobId
     });
     
     res.json({
@@ -219,6 +214,7 @@ app.get('/get-command', requireAuth, (req, res) => {
     });
   }
 });
+
 
 app.post('/discord-command', requireAuth, (req, res) => {
   const { command, playerId, targetJobId } = req.body;
@@ -508,8 +504,7 @@ discordClient.on('warn', warning => {
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
   pendingRequests.set(playerId, { 
     channel, 
-    createdAt: Date.now(),
-    targetJobId
+    createdAt: Date.now() 
   });
 
   try {
