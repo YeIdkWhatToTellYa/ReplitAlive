@@ -201,33 +201,24 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
+    // LOG EVERY SINGLE REQUEST - CRITICAL FOR DEBUG
+    log('INFO', '=== /get-command CALLED ===', {
+        serverJobId: req.headers['x-server-jobid'] || 'unknown',
+        jobId: game.JobId || 'no-jobid', // Wait, this is Node.js!
+        ip: req.ip,
+        userAgent: req.headers['user-agent'],
+        queueSize: commandQueue.size,
+        queueKeys: Array.from(commandQueue.keys()).slice(0, 5)
+    });
+
     const nextCommand = Array.from(commandQueue.values())[0];
     
     if (nextCommand) {
-        // ALWAYS return multi-server commands - NEVER remove from queue automatically
-        const isMultiServer = nextCommand.targetJobId === '*' || 
-            nextCommand.playerId.startsWith('ServerList_') || 
-            nextCommand.playerId.startsWith('Execute_') || 
-            nextCommand.playerId.startsWith('SearchPlayer_');
-            
-        if (!isMultiServer) {
-            // ONLY single-server commands get removal logic
-            if (!nextCommand.retrievalCount) {
-                nextCommand.retrievalCount = 0;
-                nextCommand.firstRetrievedAt = Date.now();
-            }
-            nextCommand.retrievalCount++;
-            
-            const timeSinceFirst = Date.now() - nextCommand.firstRetrievedAt;
-            if (timeSinceFirst > 10000 || nextCommand.retrievalCount > 20) {
-                commandQueue.delete(nextCommand.playerId);
-            }
-        }
-        
-        log('INFO', 'Command served', {
+        log('INFO', 'QUEUE HAS COMMAND - SERVING', {
             playerId: nextCommand.playerId,
-            isMultiServer,
-            queueSize: commandQueue.size
+            targetJobId: nextCommand.targetJobId,
+            isServerList: nextCommand.playerId.startsWith('ServerList_'),
+            commandPreview: nextCommand.command.substring(0, 100)
         });
         
         res.json({
@@ -238,6 +229,7 @@ app.get('/get-command', requireAuth, (req, res) => {
             commandId: `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`
         });
     } else {
+        log('WARN', 'QUEUE EMPTY - No commands available');
         res.json({ status: 'success', command: 'return "No pending commands"' });
     }
 });
