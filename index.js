@@ -455,11 +455,13 @@ app.post('/data-response', requireAuth, (req, res) => {
         responseText += `\nServer: \`${serverIdDisplay}\``;
       }
 
-      if (responseText.length > 1900) {
-        responseText =
-          responseText.substring(0, 1900) +
-          '\n```
-      }
+    if (responseText.length > 1900) {
+    responseText =
+        responseText.substring(0, 1900) +
+        '\n(Output truncated)';
+    }
+
+
 
       request.channel.send(responseText).catch(err =>
         log('ERROR', 'Failed to send execution result', { error: err.message })
