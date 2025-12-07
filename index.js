@@ -201,52 +201,50 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-    const serverId = req.query.serverId || req.headers['x-server-id'] || 'unknown';
     const nextCommand = Array.from(commandQueue.values())[0];
 
     if (nextCommand) {
         const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
         
-        // Track which servers have retrieved this command
-        if (!nextCommand.retrievedByServers) {
-            nextCommand.retrievedByServers = new Set();
+        // Track retrievals
+        if (!nextCommand.retrievalCount) {
+            nextCommand.retrievalCount = 0;
             nextCommand.firstRetrievedAt = Date.now();
-            
-            // Set up auto-deletion timer based on command type
-            const deletionDelay = nextCommand.targetJobId === '*' ? 20000 : 8000; // 20s for broadcast, 8s for targeted
-            
-            nextCommand.deletionTimer = setTimeout(() => {
-                if (commandQueue.has(nextCommand.playerId)) {
-                    commandQueue.delete(nextCommand.playerId);
-                    log('INFO', 'Command auto-removed from queue', {
-                        playerId: nextCommand.playerId,
-                        targetJobId: nextCommand.targetJobId,
-                        serversReached: nextCommand.retrievedByServers.size,
-                        timeInQueue: Date.now() - nextCommand.firstRetrievedAt
-                    });
-                }
-            }, deletionDelay);
         }
+        nextCommand.retrievalCount++;
+
+        // FIXED: Different logic for multi-server vs single-server
+        const isMultiServer = nextCommand.targetJobId === '*' || nextCommand.playerId.startsWith('ServerList_') || nextCommand.playerId.startsWith('SearchPlayer_') || nextCommand.playerId.startsWith('Execute_');
         
-        // Add this server to the set of servers that have seen it
-        nextCommand.retrievedByServers.add(serverId);
+        if (isMultiServer) {
+            // Multi-server: Keep in queue longer (60s, 100 retrievals)
+            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
+            if (timeSinceFirstRetrieval > 60000 || nextCommand.retrievalCount > 100) {
+                commandQueue.delete(nextCommand.playerId);
+                log('INFO', 'Multi-server command expired', {
+                    playerId: nextCommand.playerId,
+                    retrievalCount: nextCommand.retrievalCount,
+                    timeSinceFirst: timeSinceFirstRetrieval
+                });
+            }
+        } else {
+            // Single-server: Original quick removal logic
+            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
+            if (timeSinceFirstRetrieval > 10000 || nextCommand.retrievalCount > 20) {
+                commandQueue.delete(nextCommand.playerId);
+                log('INFO', 'Single-server command removed', {
+                    playerId: nextCommand.playerId,
+                    retrievalCount: nextCommand.retrievalCount
+                });
+            }
+        }
 
-        log('DEBUG', 'Command retrieved from queue', {
+        log('INFO', 'Command retrieved', {
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
-            commandId: commandId,
-            serverId: serverId,
-            serversReached: nextCommand.retrievedByServers.size,
-            timeInQueue: Date.now() - nextCommand.firstRetrievedAt,
-            queueRemaining: commandQueue.size
-        });
-
-        addToHistory({
-            type: 'command_retrieved',
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId,
-            serverId: serverId,
-            success: true
+            isMultiServer,
+            retrievalCount: nextCommand.retrievalCount,
+            queueSize: commandQueue.size
         });
 
         res.json({
@@ -257,10 +255,7 @@ app.get('/get-command', requireAuth, (req, res) => {
             commandId: commandId
         });
     } else {
-        res.json({
-            status: 'success',
-            command: 'return "No pending commands"'
-        });
+        res.json({ status: 'success', command: 'return "No pending commands"' });
     }
 });
 
@@ -430,7 +425,7 @@ app.post('/data-response', requireAuth, (req, res) => {
         // Handle player search responses
         if (playerId.startsWith('SearchPlayer_')) {
             const result = data?.result;
-            
+
             if (result?.found) {
                 // Player found - send immediately and cleanup
                 // Show full server ID (no substring)
@@ -729,8 +724,8 @@ discordClient.on('messageCreate', async message => {
                 .setDescription('You need Administrator permissions to use bot commands');
 
             return message.reply({ embeds: [embed] })
-                .then(m => setTimeout(() => m.delete().catch(() => {}), 5000))
-                .catch(() => {});
+                .then(m => setTimeout(() => m.delete().catch(() => { }), 5000))
+                .catch(() => { });
         }
         return;
     }
@@ -747,7 +742,7 @@ discordClient.on('messageCreate', async message => {
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!getdata <playerId>`\n\nExample: `!getdata 123456789`');
                 return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
             }
 
             const playerKey = `Player_${playerId}`;
@@ -777,14 +772,14 @@ discordClient.on('messageCreate', async message => {
                 `local players = game:GetService("Players"):GetPlayers()
 local playerNames = {}
 for _, player in ipairs(players) do
-    table.insert(playerNames, player.Name)
+table.insert(playerNames, player.Name)
 end
 return {
-    jobId = game.JobId,
-    players = playerNames,
-    count = #players,
-    maxPlayers = game.Players.MaxPlayers,
-    placeId = game.PlaceId
+jobId = game.JobId,
+players = playerNames,
+count = #players,
+maxPlayers = game.Players.MaxPlayers,
+placeId = game.PlaceId
 }`,
                 requestId,
                 '*',
@@ -809,7 +804,7 @@ return {
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
                 return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => {}), 8000));
+                    .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
             }
 
             const requestId = `Execute_${Date.now()}`;
@@ -845,7 +840,7 @@ return {result = result}`,
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!searchforplayer <playerId>`\n\nExample: `!searchforplayer 123456789`');
                 return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
             }
 
             const requestId = `SearchPlayer_${playerId}_${Date.now()}`;
@@ -854,14 +849,14 @@ return {result = result}`,
                 message.channel,
                 `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
 if player then
-    return {
-        found = true,
-        serverId = game.JobId,
-        playerName = player.Name,
-        userId = player.UserId
-    }
+return {
+found = true,
+serverId = game.JobId,
+playerName = player.Name,
+userId = player.UserId
+}
 else
-    return {found = false}
+return {found = false}
 end`,
                 requestId,
                 '*',
@@ -903,7 +898,7 @@ end`,
             .setDescription(`Failed to execute command: ${err.message}`)
             .setFooter({ text: 'Check server logs for details' });
 
-        await message.reply({ embeds: [embed] }).catch(() => {});
+        await message.reply({ embeds: [embed] }).catch(() => { });
     }
 });
 
