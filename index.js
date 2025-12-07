@@ -201,46 +201,34 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-  const nextCommand = Array.from(commandQueue.values())[0];
-  
-  if (nextCommand) {
-    const isBroadcast = nextCommand.targetJobId === '*';
-    
-    if (!isBroadcast) {
-      commandQueue.delete(nextCommand.playerId);
-      log('INFO', 'Single-target command delivered', { 
-        playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
-      });
+    const nextCommand = Array.from(commandQueue.values())[0];
+
+    if (nextCommand) {
+        const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
+
+        commandQueue.delete(nextCommand.playerId);
+
+        log('INFO', 'Command delivered and removed from queue', {
+            playerId: nextCommand.playerId,
+            targetJobId: nextCommand.targetJobId,
+            commandId
+        });
+
+        res.json({
+            status: 'success',
+            command: nextCommand.command,
+            playerId: nextCommand.playerId,
+            targetJobId: nextCommand.targetJobId,
+            commandId
+        });
     } else {
-      setTimeout(() => {
-        if (commandQueue.has(nextCommand.playerId)) {
-          commandQueue.delete(nextCommand.playerId);
-          log('INFO', 'Broadcast command auto-cleared (stale)', { 
-            playerId: nextCommand.playerId 
-          });
-        }
-      }, 30000);
-      
-      log('INFO', 'Broadcast command delivered (stays in queue)', { 
-        playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
-      });
+        res.json({
+            status: 'success',
+            command: 'return "No pending commands"'
+        });
     }
-    
-    res.json({
-      status: 'success',
-      command: nextCommand.command,
-      playerId: nextCommand.playerId,
-      targetJobId: nextCommand.targetJobId
-    });
-  } else {
-    res.json({
-      status: 'success',
-      command: 'return "No pending commands"'
-    });
-  }
 });
+
 
 
 app.post('/discord-command', requireAuth, (req, res) => {
@@ -312,10 +300,10 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         // DON'T remove multi-server commands from queue on first response
         // Let the timeout handle it so all servers can fetch it
-        const isMultiServerCommand = playerId.startsWith('ServerList_') || 
-                                     playerId.startsWith('SearchPlayer_') || 
-                                     playerId.startsWith('Execute_');
-        
+        const isMultiServerCommand = playerId.startsWith('ServerList_') ||
+            playerId.startsWith('SearchPlayer_') ||
+            playerId.startsWith('Execute_');
+
         if (!isMultiServerCommand && commandQueue.has(playerId)) {
             commandQueue.delete(playerId);
             log('DEBUG', 'Single-server command removed from queue', { playerId });
@@ -744,33 +732,33 @@ discordClient.on('messageCreate', async message => {
             await message.reply({ embeds: [embed] });
 
         } else if (command === '!getservers') {
-        const requestId = `ServerList_${Date.now()}`;
+            const requestId = `ServerList_${Date.now()}`;
 
-        await queueRobloxCommand(
-            message.channel,
-            `local players = game:GetService("Players"):GetPlayers()
-        local playerNames = {}
-        for _, player in ipairs(players) do
-        table.insert(playerNames, player.Name)
-        end
-        return {
-        jobId = game.JobId,
-        players = playerNames,
-        count = #players,
-        maxPlayers = game.Players.MaxPlayers,
-        placeId = game.PlaceId
-        }`,
-            requestId,
-            '*'
-        );
+            await queueRobloxCommand(
+                message.channel,
+                `local players = game:GetService("Players"):GetPlayers()
+                local playerNames = {}
+                for _, player in ipairs(players) do
+                table.insert(playerNames, player.Name)
+                end
+                return {
+                jobId = game.JobId,
+                players = playerNames,
+                count = #players,
+                maxPlayers = game.Players.MaxPlayers,
+                placeId = game.PlaceId
+                }`,
+                requestId,
+                '*'
+            );
 
-        const embed = new EmbedBuilder()
-            .setColor(0x00ff00)
-            .setTitle('✅ Server List Requested')
-            .setDescription('Gathering information from all active servers...')
-            .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds` });
+            const embed = new EmbedBuilder()
+                .setColor(0x00ff00)
+                .setTitle('✅ Server List Requested')
+                .setDescription('Gathering information from all active servers...')
+                .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds` });
 
-        await message.reply({ embeds: [embed] });
+            await message.reply({ embeds: [embed] });
 
 
         } else if (command === '!execute') {
@@ -787,7 +775,6 @@ discordClient.on('messageCreate', async message => {
             }
 
             const requestId = `Execute_${Date.now()}`;
-            const isMultiServer = serverId === '*';
 
             await queueRobloxCommand(
                 message.channel,
@@ -797,8 +784,7 @@ discordClient.on('messageCreate', async message => {
                 if not success then return {error = result} end
                 return {result = result}`,
                 requestId,
-                serverId,
-                isMultiServer
+                serverId
             );
 
             const embed = new EmbedBuilder()
