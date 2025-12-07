@@ -205,11 +205,31 @@ app.get('/get-command', requireAuth, (req, res) => {
 
     if (nextCommand) {
         const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
+        
+        // Track how many times this command has been retrieved
+        if (!nextCommand.retrievalCount) {
+            nextCommand.retrievalCount = 0;
+            nextCommand.firstRetrievedAt = Date.now();
+        }
+        nextCommand.retrievalCount++;
+
+        // Remove from queue after 10 seconds or if it's been retrieved 20+ times
+        // This ensures all servers get a chance to see it
+        const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
+        if (timeSinceFirstRetrieval > 10000 || nextCommand.retrievalCount > 20) {
+            commandQueue.delete(nextCommand.playerId);
+            log('INFO', 'Command removed from queue', {
+                playerId: nextCommand.playerId,
+                retrievalCount: nextCommand.retrievalCount,
+                timeSinceFirst: timeSinceFirstRetrieval
+            });
+        }
 
         log('INFO', 'Command retrieved from queue', {
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
             commandId: commandId,
+            retrievalCount: nextCommand.retrievalCount,
             queueRemaining: commandQueue.size
         });
 
@@ -341,6 +361,11 @@ app.post('/data-response', requireAuth, (req, res) => {
             const existingServer = servers.find(s => s.jobId === serverData.jobId);
             if (!existingServer) {
                 servers.push(serverData);
+                log('INFO', 'Server added to list', {
+                    jobId: serverData.jobId,
+                    playerCount: serverData.count,
+                    totalServers: servers.length
+                });
             }
 
             clearTimeout(request.collectionTimeout);
@@ -430,40 +455,115 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         // Handle execute command responses
         if (playerId.startsWith('Execute_')) {
-            const result = data?.result;
+            // Check if this is a multi-server execution
+            const isMultiServer = pendingRequests.get(playerId)?.isMultiServer;
 
-            let responseText = '';
-
-            if (success === false) {
-                responseText = `**❌ Execution Error**\n\`\`\`\n${error}\n\`\`\``;
-            } else {
-                if (result !== undefined && result !== null) {
-                    if (typeof result === 'object') {
-                        responseText = `**✅ Execution Success**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
-                    } else {
-                        responseText = `**✅ Execution Success**\n\`\`\`\n${String(result)}\n\`\`\``;
-                    }
-                } else {
-                    responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
+            if (isMultiServer) {
+                // Collect responses from multiple servers
+                if (!serverResponses.has(playerId)) {
+                    serverResponses.set(playerId, []);
                 }
 
-                const serverIdDisplay = metadata?.serverId?.length > 32 
-                    ? metadata.serverId.substring(0, 32) + '...' 
-                    : (metadata?.serverId || 'N/A');
-                responseText += `\nServer: \`${serverIdDisplay}\``;
+                const responses = serverResponses.get(playerId);
+                const result = data?.result;
+
+                const responseData = {
+                    serverId: metadata?.serverId || 'unknown',
+                    success: success !== false,
+                    result: result,
+                    error: error
+                };
+
+                // Check if we already have response from this server
+                const existingResponse = responses.find(r => r.serverId === responseData.serverId);
+                if (!existingResponse) {
+                    responses.push(responseData);
+                    log('INFO', 'Execute response received', {
+                        playerId,
+                        serverId: responseData.serverId,
+                        totalResponses: responses.length
+                    });
+                }
+
+                clearTimeout(request.collectionTimeout);
+                request.collectionTimeout = setTimeout(() => {
+                    if (serverResponses.has(playerId)) {
+                        const allResponses = serverResponses.get(playerId);
+                        serverResponses.delete(playerId);
+
+                        let responseText = `**✅ Execution Results from ${allResponses.length} server(s)**\n\n`;
+
+                        allResponses.forEach((resp, index) => {
+                            const serverIdDisplay = resp.serverId.length > 32 
+                                ? resp.serverId.substring(0, 32) + '...' 
+                                : resp.serverId;
+
+                            responseText += `**Server ${index + 1}: \`${serverIdDisplay}\`**\n`;
+
+                            if (!resp.success) {
+                                responseText += `❌ Error: \`\`\`\n${resp.error}\`\`\`\n`;
+                            } else if (resp.result !== undefined && resp.result !== null) {
+                                if (typeof resp.result === 'object') {
+                                    responseText += `\`\`\`json\n${JSON.stringify(resp.result, null, 2)}\`\`\`\n`;
+                                } else {
+                                    responseText += `\`\`\`\n${String(resp.result)}\`\`\`\n`;
+                                }
+                            } else {
+                                responseText += `✅ Success (no return value)\n`;
+                            }
+                            responseText += '\n';
+                        });
+
+                        // Split if too long
+                        if (responseText.length > 1900) {
+                            responseText = responseText.substring(0, 1900) + '...\n(Output truncated)';
+                        }
+
+                        request.channel.send(responseText).catch(err =>
+                            log('ERROR', 'Failed to send execution results', err)
+                        );
+
+                        pendingRequests.delete(playerId);
+                    }
+                }, CONFIG.RESPONSE_COLLECTION_DELAY);
+
+                return res.json({ status: 'success' });
+            } else {
+                // Single server execution
+                const result = data?.result;
+                let responseText = '';
+
+                if (success === false) {
+                    responseText = `**❌ Execution Error**\n\`\`\`\n${error}\n\`\`\``;
+                } else {
+                    if (result !== undefined && result !== null) {
+                        if (typeof result === 'object') {
+                            responseText = `**✅ Execution Success**\n\`\`\`json\n${JSON.stringify(result, null, 2)}\n\`\`\``;
+                        } else {
+                            responseText = `**✅ Execution Success**\n\`\`\`\n${String(result)}\n\`\`\``;
+                        }
+                    } else {
+                        responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
+                    }
+
+                    const serverIdDisplay = metadata?.serverId?.length > 32 
+                        ? metadata.serverId.substring(0, 32) + '...' 
+                        : (metadata?.serverId || 'N/A');
+                    responseText += `\nServer: \`${serverIdDisplay}\``;
+                }
+
+                // Split message if too long
+                if (responseText.length > 1900) {
+                    responseText = responseText.substring(0, 1900) + '...\n```\n(Output truncated)';
+                }
+
+                request.channel.send(responseText).catch(err =>
+                    log('ERROR', 'Failed to send execution result', err)
+                );
+
+                pendingRequests.delete(playerId);
+                return res.json({ status: 'success' });
             }
-
-            // Split message if too long (Discord has 2000 char limit)
-            if (responseText.length > 1900) {
-                responseText = responseText.substring(0, 1900) + '...\n```\n(Output truncated)';
-            }
-
-            request.channel.send(responseText).catch(err =>
-                log('ERROR', 'Failed to send execution result', err)
-            );
-
-            pendingRequests.delete(playerId);
-            return res.json({ status: 'success' });
         }
 
         // Handle standard data responses
@@ -552,10 +652,11 @@ discordClient.on('warn', warning => {
 });
 
 // Helper function for Discord commands
-async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
+async function queueRobloxCommand(channel, command, playerId, targetJobId = '*', isMultiServer = false) {
     pendingRequests.set(playerId, {
         channel,
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        isMultiServer: isMultiServer
     });
 
     try {
@@ -574,6 +675,7 @@ async function queueRobloxCommand(channel, command, playerId, targetJobId = '*')
         log('DEBUG', 'Command queued successfully', {
             playerId,
             targetJobId,
+            isMultiServer,
             response: response.data
         });
         return response.data;
@@ -659,7 +761,8 @@ return {
     placeId = game.PlaceId
 }`,
                 requestId,
-                '*'
+                '*',
+                true // isMultiServer
             );
 
             const embed = new EmbedBuilder()
@@ -684,16 +787,18 @@ return {
             }
 
             const requestId = `Execute_${Date.now()}`;
+            const isMultiServer = serverId === '*';
 
             await queueRobloxCommand(
                 message.channel,
-                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)([[${cmd}]])
+                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${cmd}')
 if not fn then return {error = err} end
 local success, result = pcall(fn)
 if not success then return {error = result} end
 return {result = result}`,
                 requestId,
-                serverId
+                serverId,
+                isMultiServer
             );
 
             const embed = new EmbedBuilder()
@@ -702,7 +807,7 @@ return {result = result}`,
                 .setDescription(serverId === '*'
                     ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
                     : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
-                .setFooter({ text: serverId === '*' ? 'All servers will execute this command' : `Target: ${serverId}` });
+                .setFooter({ text: serverId === '*' ? `All servers will execute this command (results in ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000}s)` : `Target: ${serverId}` });
 
             await message.reply({ embeds: [embed] });
 
@@ -733,7 +838,8 @@ else
     return {found = false}
 end`,
                 requestId,
-                '*'
+                '*',
+                false // Not collecting multiple responses, stops at first found
             );
 
             const embed = new EmbedBuilder()
