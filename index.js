@@ -21,14 +21,16 @@ function log(level, message, data) {
   console.log(`[${timestamp}][${level}] ${message}`, data || '');
 }
 
-// Middleware
-app.use(express.json({ limit: '10mb' }));
-app.use((req, res, next) => {
+// ✅ MISSING FUNCTION ADDED
+function requireAuth(req, res, next) {
   if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
     return res.status(403).json({ error: 'Invalid API key' });
   }
   next();
-});
+}
+
+// Middleware
+app.use(express.json({ limit: '10mb' }));
 
 // Routes
 app.get('/', (req, res) => {
@@ -40,7 +42,7 @@ app.get('/', (req, res) => {
   });
 });
 
-app.get('/get-command', (req, res) => {
+app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
   if (nextCommand) {
@@ -62,7 +64,7 @@ app.get('/get-command', (req, res) => {
   }
 });
 
-app.post('/discord-command', (req, res) => {
+app.post('/discord-command', requireAuth, (req, res) => {
   const { command, playerId, targetJobId } = req.body;
   
   if (!command || !playerId) {
@@ -80,7 +82,7 @@ app.post('/discord-command', (req, res) => {
   res.json({ status: 'success', queued: true });
 });
 
-app.post('/data-response', requireAuth, (req, res) => {
+app.post('/data-response', requireAuth, (req, res) => {  // ✅ Now works!
   const { playerId, success, data, error, metadata } = req.body;
   const request = pendingRequests.get(playerId);
   
@@ -111,7 +113,7 @@ app.post('/data-response', requireAuth, (req, res) => {
         .setTitle('🌐 Active Servers')
         .setDescription(`${uniqueServers.length} servers found in 10s`);
       
-      uniqueServers.forEach((server, i) => {
+      uniqueServers.slice(0, 10).forEach((server, i) => {  // Limit to 10
         embed.addFields({
           name: `Server ${i+1}`,
           value: `\`${server.jobId?.slice(0,20)}...\` (${server.count} players)`,
@@ -137,7 +139,7 @@ app.post('/data-response', requireAuth, (req, res) => {
       .setFooter({ text: `Server: ${metadata?.serverId?.slice(0,20)}` });
     
     request.channel.send({ embeds: [embed] });
-    pendingResponses.delete(playerId);
+    pendingRequests.delete(playerId);
     return res.json({ status: 'ok' });
   }
 
@@ -153,13 +155,18 @@ async function queueCommand(channel, luaCode, playerId, targetJobId = '*') {
   pendingRequests.set(playerId, { channel, createdAt: Date.now() });
   
   try {
-    await fetch(`${CONFIG.SERVER_URL}/discord-command`, {
+    const response = await fetch(`${CONFIG.SERVER_URL}/discord-command`, {
       method: 'POST',
-      headers: { 'x-api-key': CONFIG.API_PASSCODE, 'Content-Type': 'application/json' },
+      headers: { 
+        'x-api-key': CONFIG.API_PASSCODE, 
+        'Content-Type': 'application/json' 
+      },
       body: JSON.stringify({ command: luaCode, playerId, targetJobId })
     });
+    return response.ok;
   } catch (e) {
-    log('ERROR', 'Queue failed', e);
+    log('ERROR', 'Queue command failed', { error: e.message });
+    return false;
   }
 }
 
@@ -175,7 +182,7 @@ discordClient.on('messageCreate', async message => {
       `local players = game:GetService("Players"):GetPlayers()
        return {
          jobId = game.JobId,
-         players = {table.concat(players, ", ")},
+         players = {},
          count = #players,
          maxPlayers = game.Players.MaxPlayers
        }`, 
@@ -196,5 +203,23 @@ discordClient.on('messageCreate', async message => {
   }
 });
 
+discordClient.once('ready', () => {
+  log('INFO', `Bot ready - ${discordClient.user.tag}`);
+});
+
 discordClient.login(CONFIG.DISCORD_TOKEN);
-app.listen(CONFIG.PORT, () => log('INFO', `Server on port ${CONFIG.PORT}`));
+
+// Cleanup old requests
+setInterval(() => {
+  const now = Date.now();
+  for (const [id] of pendingRequests) {
+    if (now - pendingRequests.get(id).createdAt > CONFIG.REQUEST_TIMEOUT) {
+      pendingRequests.delete(id);
+    }
+  }
+}, 10000);
+
+// Start server
+app.listen(CONFIG.PORT, () => {
+  log('INFO', `🚀 Bridge running on port ${CONFIG.PORT}`);
+});
