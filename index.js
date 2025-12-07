@@ -201,35 +201,60 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-    // LOG EVERY SINGLE REQUEST - CRITICAL FOR DEBUG
-    log('INFO', '=== /get-command CALLED ===', {
-        serverJobId: req.headers['x-server-jobid'] || 'unknown',
-        jobId: game.JobId || 'no-jobid', // Wait, this is Node.js!
-        ip: req.ip,
-        userAgent: req.headers['user-agent'],
-        queueSize: commandQueue.size,
-        queueKeys: Array.from(commandQueue.keys()).slice(0, 5)
-    });
-
     const nextCommand = Array.from(commandQueue.values())[0];
-    
+
     if (nextCommand) {
-        log('INFO', 'QUEUE HAS COMMAND - SERVING', {
+        const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
+        
+        // Track retrievals
+        if (!nextCommand.retrievalCount) {
+            nextCommand.retrievalCount = 0;
+            nextCommand.firstRetrievedAt = Date.now();
+        }
+        nextCommand.retrievalCount++;
+
+        // FIXED: Different logic for multi-server vs single-server
+        const isMultiServer = nextCommand.targetJobId === '*' || nextCommand.playerId.startsWith('ServerList_') || nextCommand.playerId.startsWith('SearchPlayer_') || nextCommand.playerId.startsWith('Execute_');
+        
+        if (isMultiServer) {
+            // Multi-server: Keep in queue longer (60s, 100 retrievals)
+            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
+            if (timeSinceFirstRetrieval > 60000 || nextCommand.retrievalCount > 100) {
+                commandQueue.delete(nextCommand.playerId);
+                log('INFO', 'Multi-server command expired', {
+                    playerId: nextCommand.playerId,
+                    retrievalCount: nextCommand.retrievalCount,
+                    timeSinceFirst: timeSinceFirstRetrieval
+                });
+            }
+        } else {
+            // Single-server: Original quick removal logic
+            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
+            if (timeSinceFirstRetrieval > 10000 || nextCommand.retrievalCount > 20) {
+                commandQueue.delete(nextCommand.playerId);
+                log('INFO', 'Single-server command removed', {
+                    playerId: nextCommand.playerId,
+                    retrievalCount: nextCommand.retrievalCount
+                });
+            }
+        }
+
+        log('INFO', 'Command retrieved', {
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
-            isServerList: nextCommand.playerId.startsWith('ServerList_'),
-            commandPreview: nextCommand.command.substring(0, 100)
+            isMultiServer,
+            retrievalCount: nextCommand.retrievalCount,
+            queueSize: commandQueue.size
         });
-        
+
         res.json({
             status: 'success',
             command: nextCommand.command,
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
-            commandId: `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`
+            commandId: commandId
         });
     } else {
-        log('WARN', 'QUEUE EMPTY - No commands available');
         res.json({ status: 'success', command: 'return "No pending commands"' });
     }
 });
