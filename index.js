@@ -348,47 +348,57 @@ app.post('/data-response', requireAuth, (req, res) => {
             }
 
             const servers = serverResponses.get(playerId);
-            const serverData = {
+            servers.push({
                 jobId: data?.result?.jobId || 'unknown',
                 players: data?.result?.players || [],
                 count: data?.result?.count || 0,
                 maxPlayers: data?.result?.maxPlayers || 0,
                 placeId: data?.result?.placeId,
                 vipServerId: data?.result?.vipServerId
-            };
+            });
 
-            // Check if we already have this server
-            const existingServer = servers.find(s => s.jobId === serverData.jobId);
-            if (!existingServer) {
-                servers.push(serverData);
-                log('INFO', 'Server added to list', {
-                    jobId: serverData.jobId,
-                    playerCount: serverData.count,
-                    totalServers: servers.length
-                });
-            }
+            log('INFO', 'Server response added to collection', {
+                jobId: data?.result?.jobId,
+                playerCount: data?.result?.count,
+                totalResponses: servers.length
+            });
 
+            // Wait for all servers to respond
             clearTimeout(request.collectionTimeout);
             request.collectionTimeout = setTimeout(() => {
                 if (serverResponses.has(playerId)) {
                     const allServers = serverResponses.get(playerId);
                     serverResponses.delete(playerId);
 
-                    const totalPlayers = allServers.reduce((sum, s) => sum + s.count, 0);
+                    log('INFO', 'Finalizing server list', {
+                        totalResponses: allServers.length
+                    });
+
+                    // DEDUPLICATE BY jobId
+                    const uniqueServers = [];
+                    const seenJobIds = new Set();
+                    for (const s of allServers) {
+                        const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
+                        if (!seenJobIds.has(jobId)) {
+                            uniqueServers.push(s);
+                            seenJobIds.add(jobId);
+                        }
+                    }
+
+                    const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
 
                     const embed = new EmbedBuilder()
                         .setColor(0x00ff00)
                         .setTitle('🌐 Active Servers')
-                        .setDescription(`Found ${allServers.length} server(s) with ${totalPlayers} total player(s)`);
+                        .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
 
-                    allServers.forEach((server, index) => {
+                    uniqueServers.forEach((server, index) => {
                         const playerList = server.players.length > 0
                             ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
                             : 'No players';
 
-                        const jobIdDisplay = server.jobId.length > 32 
-                            ? server.jobId.substring(0, 32) + '...' 
-                            : server.jobId;
+                        // Show full JobId (no substring)
+                        const jobIdDisplay = server.jobId || 'unknown';
 
                         embed.addFields({
                             name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
@@ -414,9 +424,8 @@ app.post('/data-response', requireAuth, (req, res) => {
             
             if (result?.found) {
                 // Player found - send immediately and cleanup
-                const jobIdDisplay = result.serverId.length > 32 
-                    ? result.serverId.substring(0, 32) + '...' 
-                    : result.serverId;
+                // Show full server ID (no substring)
+                const jobIdDisplay = result.serverId || 'unknown';
 
                 const embed = new EmbedBuilder()
                     .setColor(0x00ff00)
@@ -467,23 +476,18 @@ app.post('/data-response', requireAuth, (req, res) => {
                 const responses = serverResponses.get(playerId);
                 const result = data?.result;
 
-                const responseData = {
+                responses.push({
                     serverId: metadata?.serverId || 'unknown',
                     success: success !== false,
                     result: result,
                     error: error
-                };
+                });
 
-                // Check if we already have response from this server
-                const existingResponse = responses.find(r => r.serverId === responseData.serverId);
-                if (!existingResponse) {
-                    responses.push(responseData);
-                    log('INFO', 'Execute response received', {
-                        playerId,
-                        serverId: responseData.serverId,
-                        totalResponses: responses.length
-                    });
-                }
+                log('INFO', 'Execute response received', {
+                    playerId,
+                    serverId: metadata?.serverId,
+                    totalResponses: responses.length
+                });
 
                 clearTimeout(request.collectionTimeout);
                 request.collectionTimeout = setTimeout(() => {
@@ -491,12 +495,26 @@ app.post('/data-response', requireAuth, (req, res) => {
                         const allResponses = serverResponses.get(playerId);
                         serverResponses.delete(playerId);
 
-                        let responseText = `**✅ Execution Results from ${allResponses.length} server(s)**\n\n`;
+                        log('INFO', 'Finalizing execute results', {
+                            totalResponses: allResponses.length
+                        });
 
-                        allResponses.forEach((resp, index) => {
-                            const serverIdDisplay = resp.serverId.length > 32 
-                                ? resp.serverId.substring(0, 32) + '...' 
-                                : resp.serverId;
+                        // DEDUPLICATE BY serverId
+                        const uniqueResponses = [];
+                        const seenServerIds = new Set();
+                        for (const resp of allResponses) {
+                            const serverId = typeof resp.serverId === 'string' ? resp.serverId : 'unknown';
+                            if (!seenServerIds.has(serverId)) {
+                                uniqueResponses.push(resp);
+                                seenServerIds.add(serverId);
+                            }
+                        }
+
+                        let responseText = `**✅ Execution Results from ${uniqueResponses.length} server(s)**\n\n`;
+
+                        uniqueResponses.forEach((resp, index) => {
+                            // Show full server ID (no substring)
+                            const serverIdDisplay = resp.serverId || 'unknown';
 
                             responseText += `**Server ${index + 1}: \`${serverIdDisplay}\`**\n`;
 
@@ -546,9 +564,8 @@ app.post('/data-response', requireAuth, (req, res) => {
                         responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
                     }
 
-                    const serverIdDisplay = metadata?.serverId?.length > 32 
-                        ? metadata.serverId.substring(0, 32) + '...' 
-                        : (metadata?.serverId || 'N/A');
+                    // Show full server ID (no substring)
+                    const serverIdDisplay = metadata?.serverId || 'N/A';
                     responseText += `\nServer: \`${serverIdDisplay}\``;
                 }
 
@@ -791,7 +808,7 @@ return {
 
             await queueRobloxCommand(
                 message.channel,
-                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${cmd}')
+                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)([[${cmd}]])
 if not fn then return {error = err} end
 local success, result = pcall(fn)
 if not success then return {error = result} end
