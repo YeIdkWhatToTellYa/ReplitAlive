@@ -789,7 +789,6 @@ discordClient.on('messageCreate', async message => {
 
             await message.reply({ embeds: [embed] });
 
-
         } else if (command === '!execute') {
             const serverId = args[1];
             const cmd = args.slice(2).join(' ');
@@ -877,7 +876,7 @@ discordClient.on('messageCreate', async message => {
                     { name: '!execute <jobId|*> <lua_code>', value: 'Execute Lua code on specific server or all servers (*)', inline: false },
                     { name: '!searchforplayer <playerId>', value: 'Find which server a player is on', inline: false },
                     { name: '!help', value: 'Show this help message', inline: false }
-                )
+                );
 
             await message.reply({ embeds: [embed] });
         }
@@ -896,6 +895,7 @@ discordClient.on('messageCreate', async message => {
         await message.reply({ embeds: [embed] }).catch(() => { });
     }
 });
+
 
 // Error handlers
 process.on('unhandledRejection', (reason, promise) => {
