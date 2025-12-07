@@ -201,63 +201,47 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-    const nextCommand = Array.from(commandQueue.values())[0];
-
-    if (nextCommand) {
-        const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
-
-        // Track retrievals
-        if (!nextCommand.retrievalCount) {
-            nextCommand.retrievalCount = 0;
-            nextCommand.firstRetrievedAt = Date.now();
-        }
-        nextCommand.retrievalCount++;
-
-        // FIXED: Different logic for multi-server vs single-server
-        const isMultiServer = nextCommand.targetJobId === '*' || nextCommand.playerId.startsWith('ServerList_') || nextCommand.playerId.startsWith('SearchPlayer_') || nextCommand.playerId.startsWith('Execute_');
-
-        if (isMultiServer) {
-            // Multi-server: Keep in queue longer (60s, 100 retrievals)
-            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
-            if (timeSinceFirstRetrieval > 60000 || nextCommand.retrievalCount > 100) {
-                commandQueue.delete(nextCommand.playerId);
-                log('INFO', 'Multi-server command expired', {
-                    playerId: nextCommand.playerId,
-                    retrievalCount: nextCommand.retrievalCount,
-                    timeSinceFirst: timeSinceFirstRetrieval
-                });
-            }
-        } else {
-            // Single-server: Original quick removal logic
-            const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
-            if (timeSinceFirstRetrieval > 10000 || nextCommand.retrievalCount > 20) {
-                commandQueue.delete(nextCommand.playerId);
-                log('INFO', 'Single-server command removed', {
-                    playerId: nextCommand.playerId,
-                    retrievalCount: nextCommand.retrievalCount
-                });
-            }
-        }
-
-        log('INFO', 'Command retrieved', {
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId,
-            isMultiServer,
-            retrievalCount: nextCommand.retrievalCount,
-            queueSize: commandQueue.size
-        });
-
-        res.json({
-            status: 'success',
-            command: nextCommand.command,
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId,
-            commandId: commandId
-        });
+  const nextCommand = Array.from(commandQueue.values())[0];
+  
+  if (nextCommand) {
+    const isBroadcast = nextCommand.targetJobId === '*';
+    
+    if (!isBroadcast) {
+      commandQueue.delete(nextCommand.playerId);
+      log('INFO', 'Single-target command delivered', { 
+        playerId: nextCommand.playerId,
+        targetJobId: nextCommand.targetJobId
+      });
     } else {
-        res.json({ status: 'success', command: 'return "No pending commands"' });
+      setTimeout(() => {
+        if (commandQueue.has(nextCommand.playerId)) {
+          commandQueue.delete(nextCommand.playerId);
+          log('INFO', 'Broadcast command auto-cleared (stale)', { 
+            playerId: nextCommand.playerId 
+          });
+        }
+      }, 30000);
+      
+      log('INFO', 'Broadcast command delivered (stays in queue)', { 
+        playerId: nextCommand.playerId,
+        targetJobId: nextCommand.targetJobId
+      });
     }
+    
+    res.json({
+      status: 'success',
+      command: nextCommand.command,
+      playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId
+    });
+  } else {
+    res.json({
+      status: 'success',
+      command: 'return "No pending commands"'
+    });
+  }
 });
+
 
 app.post('/discord-command', requireAuth, (req, res) => {
     const { command, playerId, targetJobId } = req.body;
@@ -760,34 +744,34 @@ discordClient.on('messageCreate', async message => {
             await message.reply({ embeds: [embed] });
 
         } else if (command === '!getservers') {
-            const requestId = `ServerList_${Date.now()}`;
+        const requestId = `ServerList_${Date.now()}`;
 
-            await queueRobloxCommand(
-                message.channel,
-                `local players = game:GetService("Players"):GetPlayers()
-                local playerNames = {}
-                for _, player in ipairs(players) do
-                table.insert(playerNames, player.Name)
-                end
-                return {
-                jobId = game.JobId,
-                players = playerNames,
-                count = #players,
-                maxPlayers = game.Players.MaxPlayers,
-                placeId = game.PlaceId
-                }`,
-                requestId,
-                '*',
-                true // isMultiServer
-            );
+        await queueRobloxCommand(
+            message.channel,
+            `local players = game:GetService("Players"):GetPlayers()
+        local playerNames = {}
+        for _, player in ipairs(players) do
+        table.insert(playerNames, player.Name)
+        end
+        return {
+        jobId = game.JobId,
+        players = playerNames,
+        count = #players,
+        maxPlayers = game.Players.MaxPlayers,
+        placeId = game.PlaceId
+        }`,
+            requestId,
+            '*'
+        );
 
-            const embed = new EmbedBuilder()
-                .setColor(0x00ff00)
-                .setTitle('✅ Server List Requested')
-                .setDescription('Gathering information from all active servers...')
-                .setFooter({ text: `This may take a couple of seconds` });
+        const embed = new EmbedBuilder()
+            .setColor(0x00ff00)
+            .setTitle('✅ Server List Requested')
+            .setDescription('Gathering information from all active servers...')
+            .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds` });
 
-            await message.reply({ embeds: [embed] });
+        await message.reply({ embeds: [embed] });
+
 
         } else if (command === '!execute') {
             const serverId = args[1];
