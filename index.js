@@ -72,7 +72,7 @@ const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
-const processedCommands = new Set(); // Track processed command IDs
+const processedCommands = new Set();
 const MAX_HISTORY = 100;
 
 // Middleware
@@ -81,7 +81,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
 app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', '*');
-    res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type');
+    res.header('Access-Control-Allow-Headers', 'x-api-key, Content-Type, x-server-id');
     res.header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS, DELETE');
 
     if (req.method === 'OPTIONS') {
@@ -162,7 +162,7 @@ app.get('/', (req, res) => {
     res.json({
         status: 'online',
         server: 'Discord-Roblox Bridge',
-        version: '2.3.0',
+        version: '2.4.0',
         uptime: process.uptime(),
         stats: {
             queueSize: commandQueue.size,
@@ -201,34 +201,41 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
+    const serverId = req.query.serverId || req.headers['x-server-id'] || 'unknown';
     const nextCommand = Array.from(commandQueue.values())[0];
 
     if (nextCommand) {
         const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
         
-        // Track retrievals
+        // Track retrievals and which servers have seen this
         if (!nextCommand.retrievalCount) {
             nextCommand.retrievalCount = 0;
             nextCommand.firstRetrievedAt = Date.now();
+            nextCommand.retrievedByServers = new Set();
         }
         nextCommand.retrievalCount++;
+        nextCommand.retrievedByServers.add(serverId);
 
-        // FIXED: Different logic for multi-server vs single-server
-        const isMultiServer = nextCommand.targetJobId === '*' || nextCommand.playerId.startsWith('ServerList_') || nextCommand.playerId.startsWith('SearchPlayer_') || nextCommand.playerId.startsWith('Execute_');
+        // Detect if this is a multi-server command
+        const isMultiServer = nextCommand.targetJobId === '*' || 
+                             nextCommand.playerId.startsWith('ServerList_') || 
+                             nextCommand.playerId.startsWith('SearchPlayer_') || 
+                             (nextCommand.playerId.startsWith('Execute_') && nextCommand.targetJobId === '*');
         
         if (isMultiServer) {
-            // Multi-server: Keep in queue longer (60s, 100 retrievals)
+            // Multi-server: Keep in queue for 60 seconds or 100 retrievals
             const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
             if (timeSinceFirstRetrieval > 60000 || nextCommand.retrievalCount > 100) {
                 commandQueue.delete(nextCommand.playerId);
                 log('INFO', 'Multi-server command expired', {
                     playerId: nextCommand.playerId,
                     retrievalCount: nextCommand.retrievalCount,
+                    uniqueServers: nextCommand.retrievedByServers.size,
                     timeSinceFirst: timeSinceFirstRetrieval
                 });
             }
         } else {
-            // Single-server: Original quick removal logic
+            // Single-server: Remove after 10 seconds or 20 retrievals
             const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
             if (timeSinceFirstRetrieval > 10000 || nextCommand.retrievalCount > 20) {
                 commandQueue.delete(nextCommand.playerId);
@@ -242,9 +249,19 @@ app.get('/get-command', requireAuth, (req, res) => {
         log('INFO', 'Command retrieved', {
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
+            serverId: serverId,
             isMultiServer,
             retrievalCount: nextCommand.retrievalCount,
+            uniqueServers: nextCommand.retrievedByServers.size,
             queueSize: commandQueue.size
+        });
+
+        addToHistory({
+            type: 'command_retrieved',
+            playerId: nextCommand.playerId,
+            targetJobId: nextCommand.targetJobId,
+            serverId: serverId,
+            success: true
         });
 
         res.json({
@@ -326,12 +343,6 @@ app.post('/data-response', requireAuth, (req, res) => {
             processedCommands.add(commandId);
         }
 
-        // Remove from queue after first response
-        if (commandQueue.has(playerId)) {
-            commandQueue.delete(playerId);
-            log('DEBUG', 'Command removed from queue', { playerId });
-        }
-
         const request = pendingRequests.get(playerId);
         if (!request) {
             log('DEBUG', 'No pending request found', { playerId });
@@ -401,7 +412,6 @@ app.post('/data-response', requireAuth, (req, res) => {
                             ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
                             : 'No players';
 
-                        // Show full JobId (no substring)
                         const jobIdDisplay = server.jobId || 'unknown';
 
                         embed.addFields({
@@ -427,8 +437,6 @@ app.post('/data-response', requireAuth, (req, res) => {
             const result = data?.result;
 
             if (result?.found) {
-                // Player found - send immediately and cleanup
-                // Show full server ID (no substring)
                 const jobIdDisplay = result.serverId || 'unknown';
 
                 const embed = new EmbedBuilder()
@@ -446,7 +454,6 @@ app.post('/data-response', requireAuth, (req, res) => {
                 clearTimeout(request.notFoundTimeout);
                 pendingRequests.delete(playerId);
             } else {
-                // Player not found on this server - wait for others
                 if (!request.notFoundTimeout) {
                     request.notFoundTimeout = setTimeout(() => {
                         const embed = new EmbedBuilder()
@@ -468,11 +475,9 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         // Handle execute command responses
         if (playerId.startsWith('Execute_')) {
-            // Check if this is a multi-server execution
             const isMultiServer = pendingRequests.get(playerId)?.isMultiServer;
 
             if (isMultiServer) {
-                // Collect responses from multiple servers
                 if (!serverResponses.has(playerId)) {
                     serverResponses.set(playerId, []);
                 }
@@ -517,7 +522,6 @@ app.post('/data-response', requireAuth, (req, res) => {
                         let responseText = `**✅ Execution Results from ${uniqueResponses.length} server(s)**\n\n`;
 
                         uniqueResponses.forEach((resp, index) => {
-                            // Show full server ID (no substring)
                             const serverIdDisplay = resp.serverId || 'unknown';
 
                             responseText += `**Server ${index + 1}: \`${serverIdDisplay}\`**\n`;
@@ -536,7 +540,6 @@ app.post('/data-response', requireAuth, (req, res) => {
                             responseText += '\n';
                         });
 
-                        // Split if too long
                         if (responseText.length > 1900) {
                             responseText = responseText.substring(0, 1900) + '...\n(Output truncated)';
                         }
@@ -551,12 +554,11 @@ app.post('/data-response', requireAuth, (req, res) => {
 
                 return res.json({ status: 'success' });
             } else {
-                // Single server execution
                 const result = data?.result;
                 let responseText = '';
 
                 if (success === false) {
-                    responseText = `**❌ Execution Error**\n\`\`\`\n${error}\n\`\`\``;
+                    responseText = `**❌ Execution Error**\n\`\`\`\n${error}\`\`\``;
                 } else {
                     if (result !== undefined && result !== null) {
                         if (typeof result === 'object') {
@@ -568,12 +570,10 @@ app.post('/data-response', requireAuth, (req, res) => {
                         responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
                     }
 
-                    // Show full server ID (no substring)
                     const serverIdDisplay = metadata?.serverId || 'N/A';
                     responseText += `\nServer: \`${serverIdDisplay}\``;
                 }
 
-                // Split message if too long
                 if (responseText.length > 1900) {
                     responseText = responseText.substring(0, 1900) + '...\n```\n(Output truncated)';
                 }
@@ -772,25 +772,25 @@ discordClient.on('messageCreate', async message => {
                 `local players = game:GetService("Players"):GetPlayers()
 local playerNames = {}
 for _, player in ipairs(players) do
-table.insert(playerNames, player.Name)
+    table.insert(playerNames, player.Name)
 end
 return {
-jobId = game.JobId,
-players = playerNames,
-count = #players,
-maxPlayers = game.Players.MaxPlayers,
-placeId = game.PlaceId
+    jobId = game.JobId,
+    players = playerNames,
+    count = #players,
+    maxPlayers = game.Players.MaxPlayers,
+    placeId = game.PlaceId
 }`,
                 requestId,
                 '*',
-                true // isMultiServer
+                true
             );
 
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Server List Requested')
                 .setDescription('Gathering information from all active servers...')
-                .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds` });
+                .setFooter({ text: `This may take up to ${(CONFIG.RESPONSE_COLLECTION_DELAY / 1000) + 60} seconds` });
 
             await message.reply({ embeds: [embed] });
 
@@ -805,133 +805,3 @@ placeId = game.PlaceId
                     .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
                 return message.reply({ embeds: [embed] })
                     .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
-            }
-
-            const requestId = `Execute_${Date.now()}`;
-            const isMultiServer = serverId === '*';
-
-            await queueRobloxCommand(
-                message.channel,
-                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)([[${cmd}]])
-if not fn then return {error = err} end
-local success, result = pcall(fn)
-if not success then return {error = result} end
-return {result = result}`,
-                requestId,
-                serverId,
-                isMultiServer
-            );
-
-            const embed = new EmbedBuilder()
-                .setColor(0x00ff00)
-                .setTitle('✅ Command Queued')
-                .setDescription(serverId === '*'
-                    ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
-                    : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
-                .setFooter({ text: serverId === '*' ? `All servers will execute this command (results in ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000}s)` : `Target: ${serverId}` });
-
-            await message.reply({ embeds: [embed] });
-
-        } else if (command === '!searchforplayer') {
-            const playerId = args[1]?.match(/\d+/)?.[0];
-            if (!playerId) {
-                const embed = new EmbedBuilder()
-                    .setColor(0xffa500)
-                    .setTitle('ℹ️ Usage')
-                    .setDescription('`!searchforplayer <playerId>`\n\nExample: `!searchforplayer 123456789`');
-                return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
-            }
-
-            const requestId = `SearchPlayer_${playerId}_${Date.now()}`;
-
-            await queueRobloxCommand(
-                message.channel,
-                `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
-if player then
-return {
-found = true,
-serverId = game.JobId,
-playerName = player.Name,
-userId = player.UserId
-}
-else
-return {found = false}
-end`,
-                requestId,
-                '*',
-                false // Not collecting multiple responses, stops at first found
-            );
-
-            const embed = new EmbedBuilder()
-                .setColor(0x00ff00)
-                .setTitle('✅ Search Started')
-                .setDescription(`Searching for player **${playerId}** across all servers...`);
-
-            await message.reply({ embeds: [embed] });
-
-        } else if (command === '!help') {
-            const embed = new EmbedBuilder()
-                .setColor(0x0099ff)
-                .setTitle('🤖 Bot Commands')
-                .setDescription('Available commands for administrators:')
-                .addFields(
-                    { name: '!getdata <playerId>', value: 'Fetch player data from DataStore', inline: false },
-                    { name: '!getservers', value: 'List all active game servers', inline: false },
-                    { name: '!execute <jobId|*> <lua_code>', value: 'Execute Lua code on specific server or all servers (*)', inline: false },
-                    { name: '!searchforplayer <playerId>', value: 'Find which server a player is on', inline: false },
-                    { name: '!help', value: 'Show this help message', inline: false }
-                )
-                .setFooter({ text: 'Bridge v2.3.0' });
-
-            await message.reply({ embeds: [embed] });
-        }
-    } catch (err) {
-        log('ERROR', 'Command execution failed', {
-            command,
-            error: err.message
-        });
-
-        const embed = new EmbedBuilder()
-            .setColor(0xFF0000)
-            .setTitle('❌ Error')
-            .setDescription(`Failed to execute command: ${err.message}`)
-            .setFooter({ text: 'Check server logs for details' });
-
-        await message.reply({ embeds: [embed] }).catch(() => { });
-    }
-});
-
-// Error handlers
-process.on('unhandledRejection', (reason, promise) => {
-    log('ERROR', 'Unhandled Rejection', { reason, promise });
-});
-
-process.on('uncaughtException', (error) => {
-    log('ERROR', 'Uncaught Exception', error);
-    process.exit(1);
-});
-
-// Graceful shutdown
-process.on('SIGINT', () => {
-    log('INFO', 'Shutting down gracefully...');
-    discordClient.destroy();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    log('INFO', 'Shutting down gracefully...');
-    discordClient.destroy();
-    process.exit(0);
-});
-
-// Start services
-discordClient.login(CONFIG.DISCORD_TOKEN).catch(err => {
-    log('ERROR', 'Failed to login to Discord', err);
-    process.exit(1);
-});
-
-app.listen(CONFIG.PORT, () => {
-    log('INFO', `Express server listening on port ${CONFIG.PORT}`);
-    log('INFO', '=== Bridge is ready ===');
-});
