@@ -211,34 +211,33 @@ app.get('/get-command', requireAuth, (req, res) => {
         if (!nextCommand.retrievedByServers) {
             nextCommand.retrievedByServers = new Set();
             nextCommand.firstRetrievedAt = Date.now();
+            
+            // Set up auto-deletion timer based on command type
+            const deletionDelay = nextCommand.targetJobId === '*' ? 20000 : 8000; // 20s for broadcast, 8s for targeted
+            
+            nextCommand.deletionTimer = setTimeout(() => {
+                if (commandQueue.has(nextCommand.playerId)) {
+                    commandQueue.delete(nextCommand.playerId);
+                    log('INFO', 'Command auto-removed from queue', {
+                        playerId: nextCommand.playerId,
+                        targetJobId: nextCommand.targetJobId,
+                        serversReached: nextCommand.retrievedByServers.size,
+                        timeInQueue: Date.now() - nextCommand.firstRetrievedAt
+                    });
+                }
+            }, deletionDelay);
         }
         
         // Add this server to the set of servers that have seen it
         nextCommand.retrievedByServers.add(serverId);
-        
-        const timeSinceFirstRetrieval = Date.now() - (nextCommand.firstRetrievedAt || 0);
-        
-        // For broadcast commands (*), keep in queue longer - 15 seconds
-        // For targeted commands, remove after 5 seconds
-        const timeoutDuration = nextCommand.targetJobId === '*' ? 15000 : 5000;
-        
-        // Remove from queue if timeout expired
-        if (timeSinceFirstRetrieval > timeoutDuration) {
-            commandQueue.delete(nextCommand.playerId);
-            log('INFO', 'Command removed from queue (timeout)', {
-                playerId: nextCommand.playerId,
-                serverCount: nextCommand.retrievedByServers.size,
-                timeSinceFirst: timeSinceFirstRetrieval,
-                targetJobId: nextCommand.targetJobId
-            });
-        }
 
-        log('INFO', 'Command retrieved from queue', {
+        log('DEBUG', 'Command retrieved from queue', {
             playerId: nextCommand.playerId,
             targetJobId: nextCommand.targetJobId,
             commandId: commandId,
             serverId: serverId,
-            serverCount: nextCommand.retrievedByServers.size,
+            serversReached: nextCommand.retrievedByServers.size,
+            timeInQueue: Date.now() - nextCommand.firstRetrievedAt,
             queueRemaining: commandQueue.size
         });
 
