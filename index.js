@@ -12,7 +12,7 @@ const CONFIG = {
     SERVER_URL: process.env.ROBLOX_SERVER_URL,
     REQUEST_TIMEOUT: 30000,
     MAX_QUEUE_SIZE: 100,
-    RESPONSE_COLLECTION_DELAY: 5000,
+    RESPONSE_COLLECTION_DELAY: 10000,
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
@@ -201,33 +201,51 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-    const nextCommand = Array.from(commandQueue.values())[0];
-
-    if (nextCommand) {
-        const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`;
-
-        commandQueue.delete(nextCommand.playerId);
-
-        log('INFO', 'Command delivered and removed from queue', {
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId,
-            commandId
-        });
-
-        res.json({
-            status: 'success',
-            command: nextCommand.command,
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId,
-            commandId
-        });
+  const nextCommand = Array.from(commandQueue.values())[0];
+  
+  if (nextCommand) {
+    const commandId = `${nextCommand.queuedAt}_${nextCommand.playerId}_${nextCommand.targetJobId}`; // ADD THIS
+    const isBroadcast = nextCommand.targetJobId === '*';
+    
+    if (!isBroadcast) {
+      commandQueue.delete(nextCommand.playerId);
+      log('INFO', 'Single-target command delivered', { 
+        playerId: nextCommand.playerId,
+        targetJobId: nextCommand.targetJobId,
+        commandId  // ADD THIS
+      });
     } else {
-        res.json({
-            status: 'success',
-            command: 'return "No pending commands"'
-        });
+      setTimeout(() => {
+        if (commandQueue.has(nextCommand.playerId)) {
+          commandQueue.delete(nextCommand.playerId);
+          log('INFO', 'Broadcast command auto-cleared (stale)', { 
+            playerId: nextCommand.playerId 
+          });
+        }
+      }, 30000);
+      
+      log('INFO', 'Broadcast command delivered (stays in queue)', { 
+        playerId: nextCommand.playerId,
+        targetJobId: nextCommand.targetJobId,
+        commandId  // ADD THIS
+      });
     }
+    
+    res.json({
+      status: 'success',
+      command: nextCommand.command,
+      playerId: nextCommand.playerId,
+      targetJobId: nextCommand.targetJobId,
+      commandId  // ADD THIS
+    });
+  } else {
+    res.json({
+      status: 'success',
+      command: 'return "No pending commands"'
+    });
+  }
 });
+
 
 
 
@@ -764,38 +782,40 @@ discordClient.on('messageCreate', async message => {
         } else if (command === '!execute') {
             const serverId = args[1];
             const cmd = args.slice(2).join(' ');
-
+            
             if (!serverId || !cmd) {
                 const embed = new EmbedBuilder()
-                    .setColor(0xffa500)
-                    .setTitle('ℹ️ Usage')
-                    .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
+                .setColor(0xffa500)
+                .setTitle('ℹ️ Usage')
+                .setDescription('`!execute <serverJobId|*> <lua_command>`\n\nExamples:\n`!execute * print("Hello all servers")`\n`!execute abc123 print("Hello specific server")`\n\nUse `*` to execute on all servers');
                 return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
+                .then(m => setTimeout(() => m.delete().catch(() => { }), 8000));
             }
 
             const requestId = `Execute_${Date.now()}`;
+            const escapedCmd = cmd.replace(/'/g, "\\'");
 
             await queueRobloxCommand(
                 message.channel,
-                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)(${cmd})
-                if not fn then return {error = err} end
-                local success, result = pcall(fn)
-                if not success then return {error = result} end
-                return {result = result}`,
+                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
+            if not fn then return {error = err} end
+            local success, result = pcall(fn)
+            if not success then return {error = result} end
+            return {result = result}`,
                 requestId,
                 serverId
             );
 
-            const embed = new EmbedBuilder()
+            const embed = new EmbedBuilder()  // FIX: Correct embed text
                 .setColor(0x00ff00)
                 .setTitle('✅ Command Queued')
                 .setDescription(serverId === '*'
-                    ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
-                    : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
-                .setFooter({ text: serverId === '*' ? `All servers will execute this command (results in ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000}s)` : `Target: ${serverId}` });
+                ? `Executing on **all servers**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``
+                : `Executing on server **${serverId.substring(0, 16)}...**:\n\`\`\`lua\n${cmd.substring(0, 1000)}\`\`\``)
+                .setFooter({ text: serverId === '*' ? `Results in ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000}s` : `Target: ${serverId}` });
 
             await message.reply({ embeds: [embed] });
+
 
         } else if (command === '!searchforplayer') {
             const playerId = args[1]?.match(/\d+/)?.[0];
