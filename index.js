@@ -189,25 +189,37 @@ app.get('/get-command', requireAuth, (req, res) => {
   const nextCommand = Array.from(commandQueue.values())[0];
   
   if (nextCommand) {
+    const serverJobId = req.query.serverJobId || req.headers['x-server-jobid'] || 'Studio';
     const isBroadcast = nextCommand.targetJobId === '*';
     
-    if (!isBroadcast) {
-      commandQueue.delete(nextCommand.playerId);
-      log('INFO', 'Single-target command delivered', { 
+    if (isBroadcast && !nextCommand.receivedBy) {
+      nextCommand.receivedBy = new Set();
+    }
+    
+    if (isBroadcast) {
+      if (nextCommand.receivedBy.has(serverJobId)) {
+        return res.json({
+          status: 'success',
+          command: 'return "Command already processed by this server"'
+        });
+      }
+      nextCommand.receivedBy.add(serverJobId); // MARK: This server got it
+      
+      log('INFO', 'Broadcast delivered to server', {
         playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
+        serverJobId,
+        totalServers: nextCommand.receivedBy.size
       });
-    } else {
+      
       setTimeout(() => {
         if (commandQueue.has(nextCommand.playerId)) {
           commandQueue.delete(nextCommand.playerId);
-          log('INFO', 'Broadcast command auto-cleared (stale)', { 
-            playerId: nextCommand.playerId 
-          });
+          log('INFO', 'Broadcast command auto-cleared', { playerId: nextCommand.playerId });
         }
       }, 30000);
-      
-      log('INFO', 'Broadcast command delivered (stays in queue)', { 
+    } else {
+      commandQueue.delete(nextCommand.playerId);
+      log('INFO', 'Single-target command delivered', { 
         playerId: nextCommand.playerId,
         targetJobId: nextCommand.targetJobId
       });
@@ -226,6 +238,7 @@ app.get('/get-command', requireAuth, (req, res) => {
     });
   }
 });
+
 
 
 
@@ -632,33 +645,33 @@ discordClient.on('messageCreate', async message => {
       await message.reply({ embeds: [embed] });
 
     } else if (command === '!execute') {
-  const serverId = args[1];
-  const cmd = args.slice(2).join(' ');
-  
-  if (!serverId || !cmd) { /* usage */ }
+    const serverId = args[1];
+    const cmd = args.slice(2).join(' ');
+    
+    if (!serverId || !cmd) { /* usage */ }
 
-  const requestId = `Execute_${Date.now()}`;
-  
-  const escapedCmd = cmd.replace(/'/g, "\\'");  // Escape Discord user's single quotes
+    const requestId = `Execute_${Date.now()}`;
+    
+    const escapedCmd = cmd.replace(/'/g, "\\'");  // Escape Discord user's single quotes
 
-  await queueRobloxCommand(
-    message.channel,
-    `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
-      if not fn then return {error = err} end
-      local success, result = pcall(fn)
-      if not success then return {error = result} end
-      return {result = result}`,
-    requestId,
-    serverId
-  );
+    await queueRobloxCommand(
+        message.channel,
+        `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
+        if not fn then return {error = err} end
+        local success, result = pcall(fn)
+        if not success then return {error = result} end
+        return {result = result}`,
+        requestId,
+        serverId
+    );
 
-  
-  const embed = new EmbedBuilder()
-        .setColor(0x00ff00)
-        .setTitle('✅ Search Started')
-        .setDescription(`Searching for player **${playerId}** across all servers...`);
+    
+    const embed = new EmbedBuilder()
+            .setColor(0x00ff00)
+            .setTitle('✅ Search Started')
+            .setDescription(`Searching for player **${playerId}** across all servers...`);
 
-      await message.reply({ embeds: [embed] });
+        await message.reply({ embeds: [embed] });
 
 } else if (command === '!help') {
       const embed = new EmbedBuilder()
