@@ -33,7 +33,6 @@ function log(level, message, data = null) {
     }
 }
 
-// Validation
 function validateConfig() {
     const errors = [];
 
@@ -56,9 +55,6 @@ log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
 log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
 
-
-
-// Discord client setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -67,14 +63,12 @@ const discordClient = new Client({
     ]
 });
 
-// State management
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
 
-// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -95,7 +89,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// API key validation middleware
 function requireAuth(req, res, next) {
     if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
         log('WARN', 'Unauthorized API access attempt', {
@@ -107,7 +100,6 @@ function requireAuth(req, res, next) {
     next();
 }
 
-// Utility functions
 function addToHistory(entry) {
     commandHistory.unshift({
         ...entry,
@@ -144,10 +136,8 @@ function cleanupExpiredRequests() {
     }
 }
 
-// Cleanup interval
 setInterval(cleanupExpiredRequests, 10000);
 
-// Routes
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
@@ -508,6 +498,14 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
     });
 });
 
+console.log('=== DEBUG INFO ===');
+console.log('Attempting Discord login...');
+console.log('Token exists:', !!CONFIG.DISCORD_TOKEN);
+console.log('Token length:', CONFIG.DISCORD_TOKEN?.length);
+console.log('Token preview:', CONFIG.DISCORD_TOKEN ? CONFIG.DISCORD_TOKEN.substring(0, 20) + '...' : 'MISSING');
+
+discordClient.login(CONFIG.DISCORD_TOKEN)
+
 discordClient.on('ready', () => {
     console.log('=== DISCORD READY EVENT FIRED ===');
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
@@ -523,7 +521,6 @@ discordClient.on('warn', warning => {
     log('WARN', 'Discord client warning', warning);
 });
 
-// Helper function for Discord commands
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
     pendingRequests.set(playerId, {
         channel,
@@ -637,12 +634,12 @@ discordClient.on('messageCreate', async message => {
             const cmd = args.slice(2).join(' ');
 
             if (!serverId || !cmd) {
-            const embed = new EmbedBuilder()
-                .setColor(0xffa500)
-                .setTitle('ℹ️ Usage')
-                .setDescription('`!execute <jobId|*> <lua_code>`\n\nExample: `!execute * print("Hello")`');
-            return message.reply({ embeds: [embed] })
-                .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+                const embed = new EmbedBuilder()
+                    .setColor(0xffa500)
+                    .setTitle('ℹ️ Usage')
+                    .setDescription('`!execute <jobId|*> <lua_code>`\n\nExample: `!execute * print("Hello")`');
+                return message.reply({ embeds: [embed] })
+                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
             }
 
             const requestId = `Execute_${Date.now()}`;
@@ -767,23 +764,6 @@ process.on('SIGTERM', () => {
     discordClient.destroy();
     process.exit(0);
 });
-
-console.log('=== DEBUG INFO ===');
-console.log('Attempting Discord login...');
-console.log('Token exists:', !!CONFIG.DISCORD_TOKEN);
-console.log('Token length:', CONFIG.DISCORD_TOKEN?.length);
-console.log('Token preview:', CONFIG.DISCORD_TOKEN ? CONFIG.DISCORD_TOKEN.substring(0, 20) + '...' : 'MISSING');
-
-discordClient.login(CONFIG.DISCORD_TOKEN)
-    .then(() => {
-        console.log('✅ Login promise resolved');
-    })
-    .catch(err => {
-        console.error('❌ LOGIN FAILED - Full error:');
-        console.error(err);
-        log('ERROR', 'Failed to login to Discord', err);
-        process.exit(1);
-    });
 
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
