@@ -777,18 +777,7 @@ discordClient.login(CONFIG.DISCORD_TOKEN)
         log('ERROR', 'Failed to login to Discord', err);
         process.exit(1);
     });
-```
-
-Then run your bot and **copy-paste the entire console output** here. This will show us:
-
-1. What error Discord is returning (if any)
-2. Whether the token is being read correctly from your `.env` file
-3. Whether the login attempt is even reaching Discord's servers
-
-Also, just to confirm:
-- Is your `.env` file in the **same directory** as your bot file?
-- Does your `.env` file look like this?
-```
+    
 DISCORD_BOT_TOKEN=YOUR_TOKEN_HERE
 API_PASSCODE=your_passcode
 ROBLOX_SERVER_URL=your_url
