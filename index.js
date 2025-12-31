@@ -4,9 +4,8 @@ const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require
 const axios = require('axios');
 const app = express();
 
-// Configuration
 const CONFIG = {
-    PORT: process.env.PORT || 3000,
+    PORT: 3000,
     API_PASSCODE: process.env.API_PASSCODE,
     DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
     SERVER_URL: process.env.ROBLOX_SERVER_URL,
@@ -16,7 +15,6 @@ const CONFIG = {
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
-// Logging utility
 const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const currentLogLevel = LOG_LEVELS[CONFIG.LOG_LEVEL] || LOG_LEVELS.INFO;
 
