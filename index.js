@@ -513,7 +513,7 @@ discordClient.on('ready', () => {
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
     log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
 
-    discordClient.user.setActivity('Roblox servers', { type: 'WATCHING' });
+    discordClient.user.setActivity('Roblox servers', { type: 'WATCHING' });discordClient.user.setActivity('Roblox servers', { type: 3 });
 });
 
 discordClient.on('error', err => {
@@ -563,21 +563,10 @@ async function queueRobloxCommand(channel, command, playerId, targetJobId = '*')
     }
 }
 
-// Discord message handler
 discordClient.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        if (message.content.startsWith('!')) {
-            const embed = new EmbedBuilder()
-                .setColor(0xFF0000)
-                .setTitle('🔒 Permission Denied')
-                .setDescription('You need Administrator permissions to use bot commands');
-
-            return message.reply({ embeds: [embed] })
-                .then(m => setTimeout(() => m.delete().catch(() => { }), 5000))
-                .catch(() => { });
-        }
         return;
     }
 
@@ -716,7 +705,7 @@ discordClient.on('messageCreate', async message => {
             const embed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle('Commands')
-                //.setDescription('Available commands for administrators:')
+                .setDescription('Available commands for administrators:')
                 .addFields(
                     { name: '!getdata <playerId>', value: 'Fetch player data from DataStore', inline: false },
                     { name: '!getservers', value: 'List all active game servers', inline: false },
@@ -743,7 +732,6 @@ discordClient.on('messageCreate', async message => {
     }
 });
 
-// Error handlers
 process.on('unhandledRejection', (reason, promise) => {
     log('ERROR', 'Unhandled Rejection', { reason, promise });
 });
@@ -753,7 +741,6 @@ process.on('uncaughtException', (error) => {
     process.exit(1);
 });
 
-// Graceful shutdown
 process.on('SIGINT', () => {
     log('INFO', 'Shutting down gracefully...');
     discordClient.destroy();
@@ -766,7 +753,6 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-// Start services
 discordClient.login(CONFIG.DISCORD_TOKEN).catch(err => {
     log('ERROR', 'Failed to login to Discord', err);
     process.exit(1);
