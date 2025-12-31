@@ -58,6 +58,8 @@ log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
 log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
 
+
+
 // Discord client setup
 const discordClient = new Client({
     intents: [
@@ -759,10 +761,37 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
-discordClient.login(CONFIG.DISCORD_TOKEN).catch(err => {
-    log('ERROR', 'Failed to login to Discord', err);
-    process.exit(1);
-});
+console.log('=== DEBUG INFO ===');
+console.log('Attempting Discord login...');
+console.log('Token exists:', !!CONFIG.DISCORD_TOKEN);
+console.log('Token length:', CONFIG.DISCORD_TOKEN?.length);
+console.log('Token preview:', CONFIG.DISCORD_TOKEN ? CONFIG.DISCORD_TOKEN.substring(0, 20) + '...' : 'MISSING');
+
+discordClient.login(CONFIG.DISCORD_TOKEN)
+    .then(() => {
+        console.log('✅ Login promise resolved');
+    })
+    .catch(err => {
+        console.error('❌ LOGIN FAILED - Full error:');
+        console.error(err);
+        log('ERROR', 'Failed to login to Discord', err);
+        process.exit(1);
+    });
+```
+
+Then run your bot and **copy-paste the entire console output** here. This will show us:
+
+1. What error Discord is returning (if any)
+2. Whether the token is being read correctly from your `.env` file
+3. Whether the login attempt is even reaching Discord's servers
+
+Also, just to confirm:
+- Is your `.env` file in the **same directory** as your bot file?
+- Does your `.env` file look like this?
+```
+DISCORD_BOT_TOKEN=YOUR_TOKEN_HERE
+API_PASSCODE=your_passcode
+ROBLOX_SERVER_URL=your_url
 
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
