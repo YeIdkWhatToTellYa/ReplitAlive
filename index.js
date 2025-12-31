@@ -741,13 +741,22 @@ discordClient.on('messageCreate', async message => {
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-    log('ERROR', 'Unhandled Rejection', { reason, promise });
+    console.error('UNHANDLED REJECTION:', reason);
+    log('ERROR', 'Unhandled Rejection', {
+        reason,
+        promise
+    });
 });
 
 process.on('uncaughtException', (error) => {
-    log('ERROR', 'Uncaught Exception', error);
+    console.error('UNCAUGHT EXCEPTION:', error && error.stack ? error.stack : error);
+    log('ERROR', 'Uncaught Exception', {
+        message: error?.message,
+        stack: error?.stack
+    });
     process.exit(1);
 });
+
 
 process.on('SIGINT', () => {
     log('INFO', 'Shutting down gracefully...');
