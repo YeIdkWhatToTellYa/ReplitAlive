@@ -777,10 +777,6 @@ discordClient.login(CONFIG.DISCORD_TOKEN)
         log('ERROR', 'Failed to login to Discord', err);
         process.exit(1);
     });
-    
-DISCORD_BOT_TOKEN=YOUR_TOKEN_HERE
-API_PASSCODE=your_passcode
-ROBLOX_SERVER_URL=your_url
 
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
