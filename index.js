@@ -512,8 +512,7 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
 discordClient.on('ready', () => {
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
     log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
-
-    discordClient.user.setActivity('Roblox servers', { type: 'WATCHING' });discordClient.user.setActivity('Roblox servers', { type: 3 });
+    discordClient.user.setActivity('Roblox servers', { type: 3 });
 });
 
 discordClient.on('error', err => {
