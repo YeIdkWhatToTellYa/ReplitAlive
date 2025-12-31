@@ -636,7 +636,14 @@ discordClient.on('messageCreate', async message => {
             const serverId = args[1];
             const cmd = args.slice(2).join(' ');
 
-            if (!serverId || !cmd) { /* usage */ }
+            if (!serverId || !cmd) {
+            const embed = new EmbedBuilder()
+                .setColor(0xffa500)
+                .setTitle('ℹ️ Usage')
+                .setDescription('`!execute <jobId|*> <lua_code>`\n\nExample: `!execute * print("Hello")`');
+            return message.reply({ embeds: [embed] })
+                .then(m => setTimeout(() => m.delete().catch(() => {}), 5000));
+            }
 
             const requestId = `Execute_${Date.now()}`;
 
@@ -656,8 +663,8 @@ discordClient.on('messageCreate', async message => {
 
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
-                .setTitle('✅ Search Started')
-                .setDescription(`Searching for player **${playerId}** across all servers...`);
+                .setTitle('✅ Command Queued')
+                .setDescription(`Executing on server: **${serverId}**\n\`\`\`lua\n${cmd.substring(0, 100)}${cmd.length > 100 ? '...' : ''}\n\`\`\``);
 
             await message.reply({ embeds: [embed] });
 
