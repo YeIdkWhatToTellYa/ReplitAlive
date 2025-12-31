@@ -2,10 +2,12 @@ require('dotenv').config();
 const express = require('express');
 const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
 const axios = require('axios');
+
 const app = express();
 
+// Configuration
 const CONFIG = {
-    PORT: 3000,
+    PORT: process.env.PORT || 3000,
     API_PASSCODE: process.env.API_PASSCODE,
     DISCORD_TOKEN: process.env.DISCORD_BOT_TOKEN,
     SERVER_URL: process.env.ROBLOX_SERVER_URL,
@@ -15,6 +17,7 @@ const CONFIG = {
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
+// Logging
 const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const currentLogLevel = LOG_LEVELS[CONFIG.LOG_LEVEL] || LOG_LEVELS.INFO;
 
@@ -24,24 +27,22 @@ function log(level, message, data = null) {
     const timestamp = new Date().toISOString();
     const logMessage = `[${timestamp}][${level}] ${message}`;
 
-    if (level === 'ERROR') {
-        console.error(logMessage, data ? JSON.stringify(data, null, 2) : '');
-    } else if (level === 'WARN') {
-        console.warn(logMessage, data ? JSON.stringify(data, null, 2) : '');
+    if (data) {
+        console[level.toLowerCase()](logMessage, JSON.stringify(data, null, 2));
     } else {
-        console.log(logMessage, data ? JSON.stringify(data, null, 2) : '');
+        console[level.toLowerCase()](logMessage);
     }
 }
 
+// Validate configuration
 function validateConfig() {
     const errors = [];
-
     if (!CONFIG.API_PASSCODE) errors.push('API_PASSCODE not set');
     if (!CONFIG.DISCORD_TOKEN) errors.push('DISCORD_BOT_TOKEN not set');
     if (!CONFIG.SERVER_URL) errors.push('ROBLOX_SERVER_URL not set');
 
     if (errors.length > 0) {
-        log('ERROR', 'Configuration validation failed:', errors);
+        log('ERROR', 'Configuration validation failed', errors);
         process.exit(1);
     }
 }
@@ -53,8 +54,8 @@ log('INFO', `PORT: ${CONFIG.PORT}`);
 log('INFO', `SERVER_URL: ${CONFIG.SERVER_URL}`);
 log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
-log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
 
+// Discord client setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -63,12 +64,14 @@ const discordClient = new Client({
     ]
 });
 
+// Data structures
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
 
+// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -81,31 +84,25 @@ app.use((req, res, next) => {
         return res.sendStatus(200);
     }
 
-    log('DEBUG', `${req.method} ${req.path}`, {
-        ip: req.ip,
-        headers: req.headers
-    });
-
+    log('DEBUG', `${req.method} ${req.path}`, { ip: req.ip });
     next();
 });
 
+// Authentication middleware
 function requireAuth(req, res, next) {
     if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
-        log('WARN', 'Unauthorized API access attempt', {
-            ip: req.ip,
-            path: req.path
-        });
+        log('WARN', 'Unauthorized API access attempt', { ip: req.ip, path: req.path });
         return res.status(403).json({ error: 'Invalid API key' });
     }
     next();
 }
 
+// Utility functions
 function addToHistory(entry) {
     commandHistory.unshift({
         ...entry,
         timestamp: new Date().toISOString()
     });
-
     if (commandHistory.length > MAX_HISTORY) {
         commandHistory.pop();
     }
@@ -113,24 +110,21 @@ function addToHistory(entry) {
 
 function cleanupExpiredRequests() {
     const now = Date.now();
-    const timeout = CONFIG.REQUEST_TIMEOUT;
-
     for (const [key, value] of pendingRequests.entries()) {
-        if (now - value.createdAt > timeout) {
+        if (now - value.createdAt > CONFIG.REQUEST_TIMEOUT) {
             log('WARN', 'Request timed out', { requestId: key });
 
             if (value.channel) {
                 const embed = new EmbedBuilder()
                     .setColor(0xFF0000)
                     .setTitle('⏱️ Request Timeout')
-                    .setDescription(`Request **${key}** timed out after ${timeout / 1000} seconds`)
+                    .setDescription(`Request **${key}** timed out after ${CONFIG.REQUEST_TIMEOUT / 1000} seconds`)
                     .setFooter({ text: 'The Roblox server may be offline or unresponsive' });
 
                 value.channel.send({ embeds: [embed] }).catch(err =>
-                    log('ERROR', 'Failed to send timeout message', err)
+                    log('ERROR', 'Failed to send timeout message', err.message)
                 );
             }
-
             pendingRequests.delete(key);
         }
     }
@@ -138,23 +132,17 @@ function cleanupExpiredRequests() {
 
 setInterval(cleanupExpiredRequests, 10000);
 
+// API Routes
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
         server: 'Discord-Roblox Bridge',
-        version: '2.2.0',
+        version: '2.3.0',
         uptime: process.uptime(),
         stats: {
             queueSize: commandQueue.size,
             pendingRequests: pendingRequests.size,
             commandsProcessed: commandHistory.length
-        },
-        endpoints: {
-            health: 'GET /health',
-            getCommand: 'GET /get-command',
-            dataResponse: 'POST /data-response',
-            discordCommand: 'POST /discord-command',
-            clearQueue: 'DELETE /clear-queue'
         }
     });
 });
@@ -169,8 +157,7 @@ app.get('/health', (req, res) => {
         },
         stats: {
             queueSize: commandQueue.size,
-            pendingRequests: pendingRequests.size,
-            recentCommands: commandHistory.slice(0, 10)
+            pendingRequests: pendingRequests.size
         }
     });
 });
@@ -178,59 +165,58 @@ app.get('/health', (req, res) => {
 app.get('/get-command', requireAuth, (req, res) => {
     const nextCommand = Array.from(commandQueue.values())[0];
 
-    if (nextCommand) {
-        const serverJobId = req.query.serverJobId || req.headers['x-server-jobid'] || 'Studio';
-        const isBroadcast = nextCommand.targetJobId === '*';
-
-        if (isBroadcast && !nextCommand.receivedBy) {
-            nextCommand.receivedBy = new Set();
-        }
-
-        if (isBroadcast) {
-            if (nextCommand.receivedBy.has(serverJobId)) {
-                return res.json({
-                    status: 'success',
-                    command: 'return "Command already processed by this server"'
-                });
-            }
-            nextCommand.receivedBy.add(serverJobId); // MARK: This server got it
-
-            log('INFO', 'Broadcast delivered to server', {
-                playerId: nextCommand.playerId,
-                serverJobId,
-                totalServers: nextCommand.receivedBy.size
-            });
-
-            setTimeout(() => {
-                if (commandQueue.has(nextCommand.playerId)) {
-                    commandQueue.delete(nextCommand.playerId);
-                    log('INFO', 'Broadcast command auto-cleared', { playerId: nextCommand.playerId });
-                }
-            }, 30000);
-        } else {
-            commandQueue.delete(nextCommand.playerId);
-            log('INFO', 'Single-target command delivered', {
-                playerId: nextCommand.playerId,
-                targetJobId: nextCommand.targetJobId
-            });
-        }
-
-        res.json({
-            status: 'success',
-            command: nextCommand.command,
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId
-        });
-    } else {
-        res.json({
+    if (!nextCommand) {
+        return res.json({
             status: 'success',
             command: 'return "No pending commands"'
         });
     }
+
+    const serverJobId = req.query.serverJobId || req.headers['x-server-jobid'] || 'Studio';
+    const isBroadcast = nextCommand.targetJobId === '*';
+
+    if (isBroadcast) {
+        if (!nextCommand.receivedBy) {
+            nextCommand.receivedBy = new Set();
+        }
+
+        if (nextCommand.receivedBy.has(serverJobId)) {
+            return res.json({
+                status: 'success',
+                command: 'return "Command already processed by this server"'
+            });
+        }
+
+        nextCommand.receivedBy.add(serverJobId);
+        log('INFO', 'Broadcast delivered to server', {
+            playerId: nextCommand.playerId,
+            serverJobId,
+            totalServers: nextCommand.receivedBy.size
+        });
+
+        // Auto-clear broadcast after 30 seconds
+        setTimeout(() => {
+            if (commandQueue.has(nextCommand.playerId)) {
+                commandQueue.delete(nextCommand.playerId);
+                log('INFO', 'Broadcast command auto-cleared', { playerId: nextCommand.playerId });
+            }
+        }, 30000);
+    } else {
+        // Single target - remove immediately
+        commandQueue.delete(nextCommand.playerId);
+        log('INFO', 'Single-target command delivered', {
+            playerId: nextCommand.playerId,
+            targetJobId: nextCommand.targetJobId
+        });
+    }
+
+    res.json({
+        status: 'success',
+        command: nextCommand.command,
+        playerId: nextCommand.playerId,
+        targetJobId: nextCommand.targetJobId
+    });
 });
-
-
-
 
 app.post('/discord-command', requireAuth, (req, res) => {
     const { command, playerId, targetJobId } = req.body;
@@ -256,17 +242,11 @@ app.post('/discord-command', requireAuth, (req, res) => {
         queuedAt: Date.now()
     });
 
-    log('INFO', 'Command queued', {
-        playerId,
-        targetJobId: targetJobId || '*',
-        queueSize: commandQueue.size
-    });
-
+    log('INFO', 'Command queued', { playerId, targetJobId: targetJobId || '*' });
     addToHistory({
         type: 'command_queued',
         playerId,
         targetJobId: targetJobId || '*',
-        commandPreview: command.substring(0, 50),
         success: true
     });
 
@@ -274,8 +254,7 @@ app.post('/discord-command', requireAuth, (req, res) => {
         status: 'success',
         message: 'Command queued for Roblox client',
         playerId,
-        targetJobId: targetJobId || '*',
-        queuePosition: commandQueue.size
+        targetJobId: targetJobId || '*'
     });
 });
 
@@ -294,12 +273,9 @@ app.post('/data-response', requireAuth, (req, res) => {
             return res.status(200).json({ status: 'no pending request' });
         }
 
-        log('INFO', 'Response received', {
-            playerId,
-            success,
-            serverId: metadata?.serverId
-        });
+        log('INFO', 'Response received', { playerId, success });
 
+        // Handle server list responses
         if (playerId.startsWith('ServerList_')) {
             if (!serverResponses.has(playerId)) {
                 serverResponses.set(playerId, []);
@@ -310,59 +286,53 @@ app.post('/data-response', requireAuth, (req, res) => {
                 jobId: data?.result?.jobId || 'unknown',
                 players: data?.result?.players || [],
                 count: data?.result?.count || 0,
-                maxPlayers: data?.result?.maxPlayers || 0,
-                placeId: data?.result?.placeId,
-                vipServerId: data?.result?.vipServerId
+                maxPlayers: data?.result?.maxPlayers || 0
             });
 
             clearTimeout(request.collectionTimeout);
             request.collectionTimeout = setTimeout(() => {
-                if (serverResponses.has(playerId)) {
-                    const allServers = serverResponses.get(playerId);
-                    serverResponses.delete(playerId);
+                const allServers = serverResponses.get(playerId);
+                if (!allServers) return;
 
-                    const uniqueServers = [];
-                    const seenJobIds = new Set();
-                    for (const s of allServers) {
-                        const jobId = typeof s.jobId === 'string' ? s.jobId : 'unknown';
-                        if (!seenJobIds.has(jobId)) {
-                            uniqueServers.push(s);
-                            seenJobIds.add(jobId);
-                        }
+                serverResponses.delete(playerId);
+
+                // Remove duplicates
+                const uniqueServers = [];
+                const seenJobIds = new Set();
+                for (const s of allServers) {
+                    if (!seenJobIds.has(s.jobId)) {
+                        uniqueServers.push(s);
+                        seenJobIds.add(s.jobId);
                     }
-
-                    const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
-
-                    const embed = new EmbedBuilder()
-                        .setColor(0x00ff00)
-                        .setTitle('🌐 Active Servers')
-                        .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
-
-                    uniqueServers.forEach((server, index) => {
-                        const playerList = server.players.length > 0
-                            ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
-                            : 'No players';
-
-                        const jobIdDisplay = server.jobId || 'unknown';
-
-                        embed.addFields({
-                            name: `Server ${index + 1}: ${jobIdDisplay} (${server.count}/${server.maxPlayers})`,
-                            value: `Players: ${playerList}`,
-                            inline: false
-                        });
-                    });
-
-                    request.channel.send({ embeds: [embed] }).catch(err =>
-                        log('ERROR', 'Failed to send server list', err)
-                    );
-
-                    pendingRequests.delete(playerId);
                 }
+
+                const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
+                const embed = new EmbedBuilder()
+                    .setColor(0x00ff00)
+                    .setTitle('🌐 Active Servers')
+                    .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
+
+                uniqueServers.forEach((server, index) => {
+                    const playerList = server.players.length > 0
+                        ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
+                        : 'No players';
+
+                    embed.addFields({
+                        name: `Server ${index + 1}: ${server.jobId.substring(0, 32)} (${server.count}/${server.maxPlayers})`,
+                        value: `Players: ${playerList}`,
+                        inline: false
+                    });
+                });
+
+                request.channel.send({ embeds: [embed] }).catch(err =>
+                    log('ERROR', 'Failed to send server list', err.message)
+                );
+
+                pendingRequests.delete(playerId);
             }, CONFIG.RESPONSE_COLLECTION_DELAY);
 
             return res.json({ status: 'success' });
         }
-
 
         // Handle player search responses
         if (playerId.startsWith('SearchPlayer_')) {
@@ -371,14 +341,10 @@ app.post('/data-response', requireAuth, (req, res) => {
                 .setColor(result?.found ? 0x00ff00 : 0xFF9900);
 
             if (result?.found) {
-                const jobIdDisplay = result.serverId.length > 32 ? result.serverId.substring(0, 32) + '...' : result.serverId;
-
                 embed
                     .setTitle('✅ Player Found')
                     .setDescription(`**${result.playerName}** (${result.userId})`)
-                    .addFields(
-                        { name: 'Server ID', value: `\`${jobIdDisplay}\``, inline: true }
-                    );
+                    .addFields({ name: 'Server ID', value: `\`${result.serverId.substring(0, 32)}\``, inline: true });
             } else {
                 embed
                     .setTitle('⚠️ Player Not Found')
@@ -386,7 +352,7 @@ app.post('/data-response', requireAuth, (req, res) => {
             }
 
             request.channel.send({ embeds: [embed] }).catch(err =>
-                log('ERROR', 'Failed to send search result', err)
+                log('ERROR', 'Failed to send search result', err.message)
             );
 
             pendingRequests.delete(playerId);
@@ -396,7 +362,6 @@ app.post('/data-response', requireAuth, (req, res) => {
         // Handle execute command responses
         if (playerId.startsWith('Execute_')) {
             const result = data?.result;
-
             let responseText = '';
 
             if (success === false) {
@@ -409,20 +374,19 @@ app.post('/data-response', requireAuth, (req, res) => {
                         responseText = `**✅ Execution Success**\n\`\`\`\n${String(result)}\n\`\`\``;
                     }
                 } else {
-                    responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully (no return value)\n\`\`\``;
+                    responseText = `**✅ Execution Success**\n\`\`\`\nCommand executed successfully\n\`\`\``;
                 }
 
-                const serverIdDisplay = metadata?.serverId?.length > 32 ? metadata.serverId.substring(0, 32) + '...' : (metadata?.serverId || 'N/A');
+                const serverIdDisplay = metadata?.serverId ? metadata.serverId.substring(0, 32) : 'N/A';
                 responseText += `\nServer: \`${serverIdDisplay}\``;
             }
 
-            // Split message if too long (Discord has 2000 char limit)
             if (responseText.length > 1900) {
                 responseText = responseText.substring(0, 1900) + '...\n```\n(Output truncated)';
             }
 
             request.channel.send(responseText).catch(err =>
-                log('ERROR', 'Failed to send execution result', err)
+                log('ERROR', 'Failed to send execution result', err.message)
             );
 
             pendingRequests.delete(playerId);
@@ -431,7 +395,6 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         // Handle standard data responses
         const playerData = data?.result || {};
-
         let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
 
         if (Object.keys(playerData).length === 0) {
@@ -439,7 +402,6 @@ app.post('/data-response', requireAuth, (req, res) => {
         } else {
             for (const [key, value] of Object.entries(playerData)) {
                 let formattedValue = value;
-
                 if (Array.isArray(value)) {
                     formattedValue = value.join(', ');
                 } else if (typeof value === 'object' && value !== null) {
@@ -453,35 +415,24 @@ app.post('/data-response', requireAuth, (req, res) => {
                 message += `${changeIndicator} ${key}: ${formattedValue}\n`;
             }
         }
-
         message += '```';
 
         const embed = new EmbedBuilder()
             .setColor(success === false ? 0xFF0000 : 0x00AE86)
-            .setDescription(success === false
-                ? `❌ **Error**\n\`\`\`${error}\`\`\``
-                : message)
-            .setFooter({
-                text: `Server: ${metadata?.serverId?.substring(0, 32) || 'N/A'}`
-            });
+            .setDescription(success === false ? `❌ **Error**\n\`\`\`${error}\`\`\`` : message)
+            .setFooter({ text: `Server: ${metadata?.serverId?.substring(0, 32) || 'N/A'}` });
 
         request.channel.send({ embeds: [embed] }).catch(err =>
-            log('ERROR', 'Failed to send data response', err)
+            log('ERROR', 'Failed to send data response', err.message)
         );
 
         pendingRequests.delete(playerId);
-
-        addToHistory({
-            type: 'response_received',
-            playerId,
-            success,
-            error
-        });
+        addToHistory({ type: 'response_received', playerId, success, error });
 
         res.json({ status: 'success' });
 
     } catch (err) {
-        log('ERROR', 'Error processing data response', err);
+        log('ERROR', 'Error processing data response', { error: err.message });
         res.status(500).json({ error: 'Internal server error' });
     }
 });
@@ -489,52 +440,11 @@ app.post('/data-response', requireAuth, (req, res) => {
 app.delete('/clear-queue', requireAuth, (req, res) => {
     const queueSize = commandQueue.size;
     commandQueue.clear();
-
     log('INFO', 'Command queue cleared', { clearedItems: queueSize });
-
-    res.json({
-        status: 'success',
-        message: `Cleared ${queueSize} queued commands`
-    });
+    res.json({ status: 'success', message: `Cleared ${queueSize} queued commands` });
 });
 
-console.log('=== DEBUG INFO ===');
-console.log('Attempting Discord login...');
-console.log('Token exists:', !!CONFIG.DISCORD_TOKEN);
-console.log('Token length:', CONFIG.DISCORD_TOKEN?.length);
-console.log('Token preview:', CONFIG.DISCORD_TOKEN ? CONFIG.DISCORD_TOKEN.substring(0, 20) + '...' : 'MISSING');
-
-(async () => {
-    try {
-        if (!CONFIG.DISCORD_TOKEN) {
-            log('ERROR', 'DISCORD_BOT_TOKEN is not set in environment');
-            process.exit(1);
-        }
-
-        log('INFO', 'Logging into Discord...');
-        await discordClient.login(CONFIG.DISCORD_TOKEN);
-        log('INFO', 'Discord login call resolved');
-    } catch (err) {
-        log('ERROR', 'Discord login failed', { error: err.message });
-        process.exit(1);
-    }
-})();
-
-discordClient.on('ready', () => {
-    console.log('=== DISCORD READY EVENT FIRED ===');
-    log('INFO', `Bot logged in as ${discordClient.user.tag}`);
-    log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
-    discordClient.user.setActivity('Roblox servers', { type: 3 });
-});
-
-discordClient.on('error', err => {
-    log('ERROR', 'Discord client error', err);
-});
-
-discordClient.on('warn', warning => {
-    log('WARN', 'Discord client warning', warning);
-});
-
+// Discord bot setup
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
     pendingRequests.set(playerId, {
         channel,
@@ -555,30 +465,27 @@ async function queueRobloxCommand(channel, command, playerId, targetJobId = '*')
             timeout: 5000
         });
 
-        log('DEBUG', 'Command queued successfully', {
-            playerId,
-            targetJobId,
-            response: response.data
-        });
+        log('DEBUG', 'Command queued successfully', { playerId, targetJobId });
         return response.data;
     } catch (err) {
-        log('ERROR', 'Failed to queue command', {
-            playerId,
-            targetJobId,
-            error: err.message
-        });
-
+        log('ERROR', 'Failed to queue command', { playerId, error: err.message });
         pendingRequests.delete(playerId);
         throw err;
     }
 }
 
+discordClient.on('ready', () => {
+    log('INFO', `Bot logged in as ${discordClient.user.tag}`);
+    log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
+    discordClient.user.setActivity('Roblox servers', { type: 3 });
+});
+
+discordClient.on('error', err => log('ERROR', 'Discord client error', { error: err.message }));
+discordClient.on('warn', warning => log('WARN', 'Discord client warning', { warning }));
+
 discordClient.on('messageCreate', async message => {
     if (message.author.bot) return;
-
-    if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) {
-        return;
-    }
+    if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
 
     const args = message.content.split(' ');
     const command = args[0].toLowerCase();
@@ -591,12 +498,10 @@ discordClient.on('messageCreate', async message => {
                     .setColor(0xffa500)
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!getdata <playerId>`\n\nExample: `!getdata 123456789`');
-                return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
+                return message.reply({ embeds: [embed] });
             }
 
             const playerKey = `Player_${playerId}`;
-
             await queueRobloxCommand(
                 message.channel,
                 `return game:GetService("DataStoreService"):GetDataStore("mainData"):GetAsync("${playerKey}")`,
@@ -606,31 +511,24 @@ discordClient.on('messageCreate', async message => {
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Request Queued')
-                .setDescription(`Fetching data for player **${playerId}**`)
-                .addFields(
-                    { name: 'Player ID', value: playerKey, inline: true },
-                    { name: 'Timeout', value: `${CONFIG.REQUEST_TIMEOUT / 1000}s`, inline: true }
-                );
-
+                .setDescription(`Fetching data for player **${playerId}**`);
             await message.reply({ embeds: [embed] });
 
         } else if (command === '!getservers') {
             const requestId = `ServerList_${Date.now()}`;
-
             await queueRobloxCommand(
                 message.channel,
                 `local players = game:GetService("Players"):GetPlayers()
-                local playerNames = {}
-                for _, player in ipairs(players) do
-                    table.insert(playerNames, player.Name)
-                end
-                return {
-                    jobId = game.JobId,
-                    players = playerNames,
-                    count = #players,
-                    maxPlayers = game.Players.MaxPlayers,
-                    placeId = game.PlaceId
-                }`,
+local playerNames = {}
+for _, player in ipairs(players) do
+    table.insert(playerNames, player.Name)
+end
+return {
+    jobId = game.JobId,
+    players = playerNames,
+    count = #players,
+    maxPlayers = game.Players.MaxPlayers
+}`,
                 requestId,
                 '*'
             );
@@ -638,9 +536,7 @@ discordClient.on('messageCreate', async message => {
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Server List Requested')
-                .setDescription('Gathering information from all active servers...')
-                .setFooter({ text: `This may take ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds` });
-
+                .setDescription('Gathering information from all active servers...');
             await message.reply({ embeds: [embed] });
 
         } else if (command === '!execute') {
@@ -652,31 +548,27 @@ discordClient.on('messageCreate', async message => {
                     .setColor(0xffa500)
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!execute <jobId|*> <lua_code>`\n\nExample: `!execute * print("Hello")`');
-                return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
+                return message.reply({ embeds: [embed] });
             }
 
             const requestId = `Execute_${Date.now()}`;
-
-            const escapedCmd = cmd.replace(/'/g, "\\'");  // Escape Discord user's single quotes
+            const escapedCmd = cmd.replace(/'/g, "\\'");
 
             await queueRobloxCommand(
                 message.channel,
-                `local fn, err = require(game.ServerScriptService.ExternalCommands.Loadstring)('${escapedCmd}')
-                if not fn then return {error = err} end
-                local success, result = pcall(fn)
-                if not success then return {error = result} end
-                return {result = result}`,
+                `local fn, err = loadstring('${escapedCmd}')
+if not fn then return {error = err} end
+local success, result = pcall(fn)
+if not success then return {error = result} end
+return {result = result}`,
                 requestId,
                 serverId
             );
 
-
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Command Queued')
-                .setDescription(`Executing on server: **${serverId}**\n\`\`\`lua\n${cmd.substring(0, 100)}${cmd.length > 100 ? '...' : ''}\n\`\`\``);
-
+                .setDescription(`Executing on server: **${serverId}**\n\`\`\`lua\n${cmd.substring(0, 100)}\n\`\`\``);
             await message.reply({ embeds: [embed] });
 
         } else if (command === '!searchforplayer') {
@@ -686,86 +578,61 @@ discordClient.on('messageCreate', async message => {
                     .setColor(0xffa500)
                     .setTitle('ℹ️ Usage')
                     .setDescription('`!searchforplayer <playerId>`\n\nExample: `!searchforplayer 123456789`');
-                return message.reply({ embeds: [embed] })
-                    .then(m => setTimeout(() => m.delete().catch(() => { }), 5000));
+                return message.reply({ embeds: [embed] });
             }
 
             const requestId = `SearchPlayer_${playerId}_${Date.now()}`;
-
             await queueRobloxCommand(
                 message.channel,
                 `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
-                if player then
-                return {
-                found = true,
-                serverId = game.JobId,
-                playerName = player.Name,
-                userId = player.UserId
-                }
-                else
-                return {found = false}
-                end`,
+if player then
+    return {found = true, serverId = game.JobId, playerName = player.Name, userId = player.UserId}
+else
+    return {found = false}
+end`,
                 requestId,
-                '*',
+                '*'
             );
 
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Search Started')
                 .setDescription(`Searching for player **${playerId}** across all servers...`);
-
             await message.reply({ embeds: [embed] });
-
-
 
         } else if (command === '!help') {
             const embed = new EmbedBuilder()
                 .setColor(0x0099ff)
-                .setTitle('Commands')
+                .setTitle('📋 Commands')
                 .setDescription('Available commands for administrators:')
                 .addFields(
                     { name: '!getdata <playerId>', value: 'Fetch player data from DataStore', inline: false },
                     { name: '!getservers', value: 'List all active game servers', inline: false },
-                    { name: '!execute <jobId|*> <lua_code>', value: 'Execute Lua code on specific server or all servers (*)', inline: false },
+                    { name: '!execute <jobId|*> <lua>', value: 'Execute Lua code on specific/all servers', inline: false },
                     { name: '!searchforplayer <playerId>', value: 'Find which server a player is on', inline: false },
                     { name: '!help', value: 'Show this help message', inline: false }
-                )
-
+                );
             await message.reply({ embeds: [embed] });
         }
     } catch (err) {
-        log('ERROR', 'Command execution failed', {
-            command,
-            error: err.message
-        });
-
+        log('ERROR', 'Command execution failed', { command, error: err.message });
         const embed = new EmbedBuilder()
             .setColor(0xFF0000)
             .setTitle('❌ Error')
-            .setDescription(`Failed to execute command: ${err.message}`)
-            .setFooter({ text: 'Check server logs for details' });
-
-        await message.reply({ embeds: [embed] }).catch(() => { });
+            .setDescription(`Failed to execute command: ${err.message}`);
+        await message.reply({ embeds: [embed] }).catch(() => {});
     }
 });
 
+// Error handlers
 process.on('unhandledRejection', (reason, promise) => {
-    console.error('UNHANDLED REJECTION:', reason);
-    log('ERROR', 'Unhandled Rejection', {
-        reason,
-        promise
-    });
+    log('ERROR', 'Unhandled Rejection', { reason: String(reason) });
 });
 
 process.on('uncaughtException', (error) => {
-    console.error('UNCAUGHT EXCEPTION:', error && error.stack ? error.stack : error);
-    log('ERROR', 'Uncaught Exception', {
-        message: error?.message,
-        stack: error?.stack
-    });
+    log('ERROR', 'Uncaught Exception', { message: error.message, stack: error.stack });
     process.exit(1);
 });
-
 
 process.on('SIGINT', () => {
     log('INFO', 'Shutting down gracefully...');
@@ -779,7 +646,18 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
+// Start server
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
-    log('INFO', '=== Bridge is ready ===');
 });
+
+// Login to Discord
+(async () => {
+    try {
+        log('INFO', 'Logging into Discord...');
+        await discordClient.login(CONFIG.DISCORD_TOKEN);
+    } catch (err) {
+        log('ERROR', 'Discord login failed', { error: err.message });
+        process.exit(1);
+    }
+})();
