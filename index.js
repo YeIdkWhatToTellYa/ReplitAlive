@@ -504,7 +504,21 @@ console.log('Token exists:', !!CONFIG.DISCORD_TOKEN);
 console.log('Token length:', CONFIG.DISCORD_TOKEN?.length);
 console.log('Token preview:', CONFIG.DISCORD_TOKEN ? CONFIG.DISCORD_TOKEN.substring(0, 20) + '...' : 'MISSING');
 
-discordClient.login(CONFIG.DISCORD_TOKEN)
+(async () => {
+    try {
+        if (!CONFIG.DISCORD_TOKEN) {
+            log('ERROR', 'DISCORD_BOT_TOKEN is not set in environment');
+            process.exit(1);
+        }
+
+        log('INFO', 'Logging into Discord...');
+        await discordClient.login(CONFIG.DISCORD_TOKEN);
+        log('INFO', 'Discord login call resolved');
+    } catch (err) {
+        log('ERROR', 'Discord login failed', { error: err.message });
+        process.exit(1);
+    }
+})();
 
 discordClient.on('ready', () => {
     console.log('=== DISCORD READY EVENT FIRED ===');
