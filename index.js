@@ -510,8 +510,8 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
     });
 });
 
-// Discord event handlers
 discordClient.on('ready', () => {
+    console.log('=== DISCORD READY EVENT FIRED ===');
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
     log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
     discordClient.user.setActivity('Roblox servers', { type: 3 });
