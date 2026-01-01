@@ -5,7 +5,6 @@ const axios = require('axios');
 
 const app = express();
 
-// Configuration
 const CONFIG = {
     PORT: process.env.PORT || 3000,
     API_PASSCODE: process.env.API_PASSCODE,
@@ -17,7 +16,6 @@ const CONFIG = {
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
-// Logging
 const LOG_LEVELS = { DEBUG: 0, INFO: 1, WARN: 2, ERROR: 3 };
 const currentLogLevel = LOG_LEVELS[CONFIG.LOG_LEVEL] || LOG_LEVELS.INFO;
 
@@ -34,7 +32,6 @@ function log(level, message, data = null) {
     }
 }
 
-// Validate configuration
 function validateConfig() {
     const errors = [];
     if (!CONFIG.API_PASSCODE) errors.push('API_PASSCODE not set');
@@ -55,7 +52,6 @@ log('INFO', `SERVER_URL: ${CONFIG.SERVER_URL}`);
 log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
 
-// Discord client setup
 const discordClient = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -64,14 +60,12 @@ const discordClient = new Client({
     ]
 });
 
-// Data structures
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
 
-// Middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -88,7 +82,6 @@ app.use((req, res, next) => {
     next();
 });
 
-// Authentication middleware
 function requireAuth(req, res, next) {
     if (req.headers['x-api-key'] !== CONFIG.API_PASSCODE) {
         log('WARN', 'Unauthorized API access attempt', { ip: req.ip, path: req.path });
@@ -97,7 +90,6 @@ function requireAuth(req, res, next) {
     next();
 }
 
-// Utility functions
 function addToHistory(entry) {
     commandHistory.unshift({
         ...entry,
@@ -132,7 +124,6 @@ function cleanupExpiredRequests() {
 
 setInterval(cleanupExpiredRequests, 10000);
 
-// API Routes
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
@@ -194,7 +185,6 @@ app.get('/get-command', requireAuth, (req, res) => {
             totalServers: nextCommand.receivedBy.size
         });
 
-        // Auto-clear broadcast after 30 seconds
         setTimeout(() => {
             if (commandQueue.has(nextCommand.playerId)) {
                 commandQueue.delete(nextCommand.playerId);
@@ -202,7 +192,6 @@ app.get('/get-command', requireAuth, (req, res) => {
             }
         }, 30000);
     } else {
-        // Single target - remove immediately
         commandQueue.delete(nextCommand.playerId);
         log('INFO', 'Single-target command delivered', {
             playerId: nextCommand.playerId,
@@ -275,7 +264,6 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         log('INFO', 'Response received', { playerId, success });
 
-        // Handle server list responses
         if (playerId.startsWith('ServerList_')) {
             if (!serverResponses.has(playerId)) {
                 serverResponses.set(playerId, []);
@@ -296,7 +284,6 @@ app.post('/data-response', requireAuth, (req, res) => {
 
                 serverResponses.delete(playerId);
 
-                // Remove duplicates
                 const uniqueServers = [];
                 const seenJobIds = new Set();
                 for (const s of allServers) {
@@ -334,7 +321,6 @@ app.post('/data-response', requireAuth, (req, res) => {
             return res.json({ status: 'success' });
         }
 
-        // Handle player search responses
         if (playerId.startsWith('SearchPlayer_')) {
             const result = data?.result;
             const embed = new EmbedBuilder()
@@ -359,7 +345,6 @@ app.post('/data-response', requireAuth, (req, res) => {
             return res.json({ status: 'success' });
         }
 
-        // Handle execute command responses
         if (playerId.startsWith('Execute_')) {
             const result = data?.result;
             let responseText = '';
@@ -393,7 +378,6 @@ app.post('/data-response', requireAuth, (req, res) => {
             return res.json({ status: 'success' });
         }
 
-        // Handle standard data responses
         const playerData = data?.result || {};
         let message = `📊 **${playerId}'s Data**\n\`\`\`diff\n`;
 
@@ -519,16 +503,16 @@ discordClient.on('messageCreate', async message => {
             await queueRobloxCommand(
                 message.channel,
                 `local players = game:GetService("Players"):GetPlayers()
-local playerNames = {}
-for _, player in ipairs(players) do
-    table.insert(playerNames, player.Name)
-end
-return {
-    jobId = game.JobId,
-    players = playerNames,
-    count = #players,
-    maxPlayers = game.Players.MaxPlayers
-}`,
+                local playerNames = {}
+                for _, player in ipairs(players) do
+                    table.insert(playerNames, player.Name)
+                end
+                return {
+                    jobId = game.JobId,
+                    players = playerNames,
+                    count = #players,
+                    maxPlayers = game.Players.MaxPlayers
+                }`,
                 requestId,
                 '*'
             );
@@ -557,10 +541,10 @@ return {
             await queueRobloxCommand(
                 message.channel,
                 `local fn, err = loadstring('${escapedCmd}')
-if not fn then return {error = err} end
-local success, result = pcall(fn)
-if not success then return {error = result} end
-return {result = result}`,
+                if not fn then return {error = err} end
+                local success, result = pcall(fn)
+                if not success then return {error = result} end
+                return {result = result}`,
                 requestId,
                 serverId
             );
@@ -585,11 +569,11 @@ return {result = result}`,
             await queueRobloxCommand(
                 message.channel,
                 `local player = game:GetService("Players"):GetPlayerByUserId(${playerId})
-if player then
-    return {found = true, serverId = game.JobId, playerName = player.Name, userId = player.UserId}
-else
-    return {found = false}
-end`,
+                if player then
+                    return {found = true, serverId = game.JobId, playerName = player.Name, userId = player.UserId}
+                else
+                    return {found = false}
+                end`,
                 requestId,
                 '*'
             );
@@ -632,18 +616,6 @@ process.on('unhandledRejection', (reason, promise) => {
 process.on('uncaughtException', (error) => {
     log('ERROR', 'Uncaught Exception', { message: error.message, stack: error.stack });
     process.exit(1);
-});
-
-process.on('SIGINT', () => {
-    log('INFO', 'Shutting down gracefully...');
-    discordClient.destroy();
-    process.exit(0);
-});
-
-process.on('SIGTERM', () => {
-    log('INFO', 'Shutting down gracefully...');
-    discordClient.destroy();
-    process.exit(0);
 });
 
 // Start server
