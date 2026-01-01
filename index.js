@@ -604,11 +604,10 @@ discordClient.on('messageCreate', async message => {
             .setColor(0xFF0000)
             .setTitle('❌ Error')
             .setDescription(`Failed to execute command: ${err.message}`);
-        await message.reply({ embeds: [embed] }).catch(() => {});
+        await message.reply({ embeds: [embed] }).catch(() => { });
     }
 });
 
-// Error handlers
 process.on('unhandledRejection', (reason, promise) => {
     log('ERROR', 'Unhandled Rejection', { reason: String(reason) });
 });
@@ -618,12 +617,10 @@ process.on('uncaughtException', (error) => {
     process.exit(1);
 });
 
-// Start server
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
 });
 
-// Login to Discord
 (async () => {
     try {
         log('INFO', 'Logging into Discord...');
