@@ -26,9 +26,9 @@ function log(level, message, data = null) {
     const logMessage = `[${timestamp}][${level}] ${message}`;
 
     if (data) {
-        console[level.toLowerCase()](logMessage, JSON.stringify(data, null, 2));
+        (console[level.toLowerCase()] || console.log)(logMessage, JSON.stringify(data, null, 2));
     } else {
-        console[level.toLowerCase()](logMessage);
+        (console[level.toLowerCase()] || console.log)(logMessage);
     }
 }
 
@@ -36,11 +36,14 @@ function validateConfig() {
     const errors = [];
     if (!CONFIG.API_PASSCODE) errors.push('API_PASSCODE not set');
     if (!CONFIG.DISCORD_TOKEN) errors.push('DISCORD_BOT_TOKEN not set');
-    if (!CONFIG.SERVER_URL) errors.push('ROBLOX_SERVER_URL not set');
 
     if (errors.length > 0) {
         log('ERROR', 'Configuration validation failed', errors);
         process.exit(1);
+    }
+
+    if (!CONFIG.SERVER_URL) {
+        log('WARN', 'ROBLOX_SERVER_URL not set – Roblox command bridge will not work until this is configured.');
     }
 }
 
@@ -48,9 +51,10 @@ validateConfig();
 
 log('INFO', '=== CONFIGURATION ===');
 log('INFO', `PORT: ${CONFIG.PORT}`);
-log('INFO', `SERVER_URL: ${CONFIG.SERVER_URL}`);
+log('INFO', `SERVER_URL: ${CONFIG.SERVER_URL || '(not set)'}`);
 log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
+log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
 
 const discordClient = new Client({
     intents: [
@@ -60,12 +64,14 @@ const discordClient = new Client({
     ]
 });
 
+// In‑memory state
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
 
+// Express middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -114,16 +120,16 @@ function cleanupExpiredRequests() {
                     .setFooter({ text: 'The Roblox server may be offline or unresponsive' });
 
                 value.channel.send({ embeds: [embed] }).catch(err =>
-                    log('ERROR', 'Failed to send timeout message', err.message)
+                    log('ERROR', 'Failed to send timeout message', { error: err.message })
                 );
             }
             pendingRequests.delete(key);
         }
     }
 }
-
 setInterval(cleanupExpiredRequests, 10000);
 
+// Routes
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
@@ -312,7 +318,7 @@ app.post('/data-response', requireAuth, (req, res) => {
                 });
 
                 request.channel.send({ embeds: [embed] }).catch(err =>
-                    log('ERROR', 'Failed to send server list', err.message)
+                    log('ERROR', 'Failed to send server list', { error: err.message })
                 );
 
                 pendingRequests.delete(playerId);
@@ -338,7 +344,7 @@ app.post('/data-response', requireAuth, (req, res) => {
             }
 
             request.channel.send({ embeds: [embed] }).catch(err =>
-                log('ERROR', 'Failed to send search result', err.message)
+                log('ERROR', 'Failed to send search result', { error: err.message })
             );
 
             pendingRequests.delete(playerId);
@@ -371,7 +377,7 @@ app.post('/data-response', requireAuth, (req, res) => {
             }
 
             request.channel.send(responseText).catch(err =>
-                log('ERROR', 'Failed to send execution result', err.message)
+                log('ERROR', 'Failed to send execution result', { error: err.message })
             );
 
             pendingRequests.delete(playerId);
@@ -407,7 +413,7 @@ app.post('/data-response', requireAuth, (req, res) => {
             .setFooter({ text: `Server: ${metadata?.serverId?.substring(0, 32) || 'N/A'}` });
 
         request.channel.send({ embeds: [embed] }).catch(err =>
-            log('ERROR', 'Failed to send data response', err.message)
+            log('ERROR', 'Failed to send data response', { error: err.message })
         );
 
         pendingRequests.delete(playerId);
@@ -428,8 +434,12 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
     res.json({ status: 'success', message: `Cleared ${queueSize} queued commands` });
 });
 
-// Discord bot setup
+// Roblox command queue helper
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
+    if (!CONFIG.SERVER_URL) {
+        throw new Error('ROBLOX_SERVER_URL is not configured; cannot queue Roblox command.');
+    }
+
     pendingRequests.set(playerId, {
         channel,
         createdAt: Date.now(),
@@ -458,6 +468,7 @@ async function queueRobloxCommand(channel, command, playerId, targetJobId = '*')
     }
 }
 
+// Discord bot events
 discordClient.on('ready', () => {
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
     log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
@@ -469,9 +480,9 @@ discordClient.on('warn', warning => log('WARN', 'Discord client warning', { warn
 
 discordClient.on('messageCreate', async message => {
     if (message.author.bot) return;
-    if (!message.member?.permissions.has(PermissionsBitField.Flags.Administrator)) return;
+    if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return;
 
-    const args = message.content.split(' ');
+    const args = message.content.trim().split(/\s+/);
     const command = args[0].toLowerCase();
 
     try {
@@ -608,6 +619,7 @@ discordClient.on('messageCreate', async message => {
     }
 });
 
+// Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
     log('ERROR', 'Unhandled Rejection', { reason: String(reason) });
 });
@@ -617,14 +629,18 @@ process.on('uncaughtException', (error) => {
     process.exit(1);
 });
 
+// Start HTTP server
+log('INFO', 'Starting Express HTTP server...');
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
 });
 
+// Start Discord bot
 (async () => {
     try {
         log('INFO', 'Logging into Discord...');
         await discordClient.login(CONFIG.DISCORD_TOKEN);
+        log('INFO', 'Discord login resolved (no exception).');
     } catch (err) {
         log('ERROR', 'Discord login failed', { error: err.message });
         process.exit(1);
