@@ -12,7 +12,8 @@ const CONFIG = {
     SERVER_URL: process.env.ROBLOX_SERVER_URL,
     REQUEST_TIMEOUT: 30000,
     MAX_QUEUE_SIZE: 100,
-    RESPONSE_COLLECTION_DELAY: 5000,
+    // How long to collect server list responses after the FIRST response (ms)
+    RESPONSE_COLLECTION_DELAY: Number(process.env.RESPONSE_COLLECTION_DELAY) || 15000,
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
 
@@ -55,6 +56,7 @@ log('INFO', `SERVER_URL: ${CONFIG.SERVER_URL || '(not set)'}`);
 log('INFO', `API_PASSCODE: ${CONFIG.API_PASSCODE ? '***SET***' : 'NOT SET'}`);
 log('INFO', `DISCORD_TOKEN: ${CONFIG.DISCORD_TOKEN ? '***SET***' : 'NOT SET'}`);
 log('INFO', `LOG_LEVEL: ${CONFIG.LOG_LEVEL}`);
+log('INFO', `RESPONSE_COLLECTION_DELAY: ${CONFIG.RESPONSE_COLLECTION_DELAY}ms`);
 
 const discordClient = new Client({
     intents: [
@@ -191,6 +193,7 @@ app.get('/get-command', requireAuth, (req, res) => {
             totalServers: nextCommand.receivedBy.size
         });
 
+        // Auto-clear after some time so the queue doesn't get stuck
         setTimeout(() => {
             if (commandQueue.has(nextCommand.playerId)) {
                 commandQueue.delete(nextCommand.playerId);
@@ -270,9 +273,60 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         log('INFO', 'Response received', { playerId, success });
 
+        // ---- MULTI-SERVER SERVER LIST COLLECTION ----
         if (playerId.startsWith('ServerList_')) {
-            if (!serverResponses.has(playerId)) {
+            const isFirstResponse = !serverResponses.has(playerId);
+
+            if (isFirstResponse) {
                 serverResponses.set(playerId, []);
+
+                log('INFO', 'First server list response received, starting collection window', {
+                    playerId,
+                    delayMs: CONFIG.RESPONSE_COLLECTION_DELAY
+                });
+
+                request.collectionTimeout = setTimeout(() => {
+                    const allServers = serverResponses.get(playerId) || [];
+                    serverResponses.delete(playerId);
+
+                    if (!request.channel) {
+                        pendingRequests.delete(playerId);
+                        return;
+                    }
+
+                    const uniqueServers = [];
+                    const seenJobIds = new Set();
+                    for (const s of allServers) {
+                        if (!seenJobIds.has(s.jobId)) {
+                            uniqueServers.push(s);
+                            seenJobIds.add(s.jobId);
+                        }
+                    }
+
+                    const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
+                    const embed = new EmbedBuilder()
+                        .setColor(0x00ff00)
+                        .setTitle('🌐 Active Servers')
+                        .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
+
+                    uniqueServers.forEach((server, index) => {
+                        const playerList = server.players.length > 0
+                            ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
+                            : 'No players';
+
+                        embed.addFields({
+                            name: `Server ${index + 1}: ${server.jobId.substring(0, 32)} (${server.count}/${server.maxPlayers})`,
+                            value: `Players: ${playerList}`,
+                            inline: false
+                        });
+                    });
+
+                    request.channel.send({ embeds: [embed] }).catch(err =>
+                        log('ERROR', 'Failed to send server list', { error: err.message })
+                    );
+
+                    pendingRequests.delete(playerId);
+                }, CONFIG.RESPONSE_COLLECTION_DELAY);
             }
 
             const servers = serverResponses.get(playerId);
@@ -283,49 +337,15 @@ app.post('/data-response', requireAuth, (req, res) => {
                 maxPlayers: data?.result?.maxPlayers || 0
             });
 
-            clearTimeout(request.collectionTimeout);
-            request.collectionTimeout = setTimeout(() => {
-                const allServers = serverResponses.get(playerId);
-                if (!allServers) return;
-
-                serverResponses.delete(playerId);
-
-                const uniqueServers = [];
-                const seenJobIds = new Set();
-                for (const s of allServers) {
-                    if (!seenJobIds.has(s.jobId)) {
-                        uniqueServers.push(s);
-                        seenJobIds.add(s.jobId);
-                    }
-                }
-
-                const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
-                const embed = new EmbedBuilder()
-                    .setColor(0x00ff00)
-                    .setTitle('🌐 Active Servers')
-                    .setDescription(`Found ${uniqueServers.length} server(s) with ${totalPlayers} total player(s)`);
-
-                uniqueServers.forEach((server, index) => {
-                    const playerList = server.players.length > 0
-                        ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
-                        : 'No players';
-
-                    embed.addFields({
-                        name: `Server ${index + 1}: ${server.jobId.substring(0, 32)} (${server.count}/${server.maxPlayers})`,
-                        value: `Players: ${playerList}`,
-                        inline: false
-                    });
-                });
-
-                request.channel.send({ embeds: [embed] }).catch(err =>
-                    log('ERROR', 'Failed to send server list', { error: err.message })
-                );
-
-                pendingRequests.delete(playerId);
-            }, CONFIG.RESPONSE_COLLECTION_DELAY);
+            log('DEBUG', 'Server list response appended', {
+                playerId,
+                jobId: data?.result?.jobId || 'unknown',
+                responseCount: servers.length
+            });
 
             return res.json({ status: 'success' });
         }
+        // ---- END SERVER LIST BRANCH ----
 
         if (playerId.startsWith('SearchPlayer_')) {
             const result = data?.result;
@@ -483,10 +503,10 @@ discordClient.on('messageCreate', async message => {
     if (!message.member?.permissions?.has(PermissionsBitField.Flags.Administrator)) return;
 
     const args = message.content.trim().split(/\s+/);
-    const command = args[0].toLowerCase();
+    const cmdName = args[0].toLowerCase();
 
     try {
-        if (command === '!getdata') {
+        if (cmdName === '!getdata') {
             const playerId = args[1]?.match(/\d+/)?.[0];
             if (!playerId) {
                 const embed = new EmbedBuilder()
@@ -509,7 +529,7 @@ discordClient.on('messageCreate', async message => {
                 .setDescription(`Fetching data for player **${playerId}**`);
             await message.reply({ embeds: [embed] });
 
-        } else if (command === '!getservers') {
+        } else if (cmdName === '!getservers') {
             const requestId = `ServerList_${Date.now()}`;
             await queueRobloxCommand(
                 message.channel,
@@ -531,10 +551,10 @@ discordClient.on('messageCreate', async message => {
             const embed = new EmbedBuilder()
                 .setColor(0x00ff00)
                 .setTitle('✅ Server List Requested')
-                .setDescription('Gathering information from all active servers...');
+                .setDescription(`Gathering information from all active servers...\nThis may take up to ${CONFIG.RESPONSE_COLLECTION_DELAY / 1000} seconds.`);
             await message.reply({ embeds: [embed] });
 
-        } else if (command === '!execute') {
+        } else if (cmdName === '!execute') {
             const serverId = args[1];
             const cmd = args.slice(2).join(' ');
 
@@ -566,7 +586,7 @@ discordClient.on('messageCreate', async message => {
                 .setDescription(`Executing on server: **${serverId}**\n\`\`\`lua\n${cmd.substring(0, 100)}\n\`\`\``);
             await message.reply({ embeds: [embed] });
 
-        } else if (command === '!searchforplayer') {
+        } else if (cmdName === '!searchforplayer') {
             const playerId = args[1]?.match(/\d+/)?.[0];
             if (!playerId) {
                 const embed = new EmbedBuilder()
@@ -595,7 +615,7 @@ discordClient.on('messageCreate', async message => {
                 .setDescription(`Searching for player **${playerId}** across all servers...`);
             await message.reply({ embeds: [embed] });
 
-        } else if (command === '!help') {
+        } else if (cmdName === '!help') {
             const embed = new EmbedBuilder()
                 .setColor(0x0099ff)
                 .setTitle('📋 Commands')
@@ -610,7 +630,7 @@ discordClient.on('messageCreate', async message => {
             await message.reply({ embeds: [embed] });
         }
     } catch (err) {
-        log('ERROR', 'Command execution failed', { command, error: err.message });
+        log('ERROR', 'Command execution failed', { command: cmdName, error: err.message });
         const embed = new EmbedBuilder()
             .setColor(0xFF0000)
             .setTitle('❌ Error')
