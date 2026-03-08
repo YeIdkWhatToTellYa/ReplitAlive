@@ -1,6 +1,6 @@
 require('dotenv').config();
 const express = require('express');
-const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, PermissionsBitField, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const axios = require('axios');
 
 const app = express();
@@ -12,7 +12,6 @@ const CONFIG = {
     SERVER_URL: process.env.ROBLOX_SERVER_URL,
     REQUEST_TIMEOUT: 30000,
     MAX_QUEUE_SIZE: 100,
-    // How long to collect server list responses after the FIRST response (ms)
     RESPONSE_COLLECTION_DELAY: Number(process.env.RESPONSE_COLLECTION_DELAY) || 20000,
     LOG_LEVEL: process.env.LOG_LEVEL || 'INFO'
 };
@@ -66,14 +65,14 @@ const discordClient = new Client({
     ]
 });
 
-// In‑memory state
 const commandQueue = new Map();
 const pendingRequests = new Map();
 const serverResponses = new Map();
+const serverListPages = new Map();
 const commandHistory = [];
 const MAX_HISTORY = 100;
+const PAGE_SIZE = 6;
 
-// Express middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
@@ -131,7 +130,16 @@ function cleanupExpiredRequests() {
 }
 setInterval(cleanupExpiredRequests, 10000);
 
-// Routes
+function cleanupExpiredServerListPages() {
+    const now = Date.now();
+    for (const [msgId, data] of serverListPages.entries()) {
+        if (now > data.expiresAt) {
+            serverListPages.delete(msgId);
+        }
+    }
+}
+setInterval(cleanupExpiredServerListPages, 60000);
+
 app.get('/', (req, res) => {
     res.json({
         status: 'online',
@@ -161,7 +169,6 @@ app.get('/health', (req, res) => {
     });
 });
 
-// Optional: handle Roblox POST /health to stop spam
 app.post('/health', requireAuth, (req, res) => {
     log('DEBUG', 'Health ping from Roblox', {
         serverId: req.body?.serverId,
@@ -172,56 +179,65 @@ app.post('/health', requireAuth, (req, res) => {
 });
 
 app.get('/get-command', requireAuth, (req, res) => {
-    const nextCommand = Array.from(commandQueue.values())[0];
-
-    if (!nextCommand) {
-        return res.json({
-            status: 'success',
-            command: 'return "No pending commands"'
-        });
-    }
-
     const serverJobId = req.query.serverJobId || req.headers['x-server-jobid'] || 'Studio';
-    const isBroadcast = nextCommand.targetJobId === '*';
 
-    if (isBroadcast) {
-        if (!nextCommand.receivedBy) {
-            nextCommand.receivedBy = new Set();
-        }
+    for (const [key, nextCommand] of commandQueue.entries()) {
+        const isBroadcast = nextCommand.targetJobId === '*';
+        const matchesTarget = nextCommand.targetJobId === serverJobId;
 
-        if (nextCommand.receivedBy.has(serverJobId)) {
+        if (isBroadcast) {
+            if (!nextCommand.receivedBy) {
+                nextCommand.receivedBy = new Set();
+            }
+
+            if (nextCommand.receivedBy.has(serverJobId)) {
+                return res.json({
+                    status: 'success',
+                    command: 'return "Command already processed by this server"'
+                });
+            }
+
+            nextCommand.receivedBy.add(serverJobId);
+            log('INFO', 'Broadcast delivered to server', {
+                playerId: nextCommand.playerId,
+                serverJobId,
+                totalServers: nextCommand.receivedBy.size
+            });
+
+            setTimeout(() => {
+                if (commandQueue.has(nextCommand.playerId)) {
+                    commandQueue.delete(nextCommand.playerId);
+                    log('INFO', 'Broadcast command auto-cleared', { playerId: nextCommand.playerId });
+                }
+            }, 30000);
+
             return res.json({
                 status: 'success',
-                command: 'return "Command already processed by this server"'
+                command: nextCommand.command,
+                playerId: nextCommand.playerId,
+                targetJobId: nextCommand.targetJobId
             });
         }
 
-        nextCommand.receivedBy.add(serverJobId);
-        log('INFO', 'Broadcast delivered to server', {
-            playerId: nextCommand.playerId,
-            serverJobId,
-            totalServers: nextCommand.receivedBy.size
-        });
-
-        setTimeout(() => {
-            if (commandQueue.has(nextCommand.playerId)) {
-                commandQueue.delete(nextCommand.playerId);
-                log('INFO', 'Broadcast command auto-cleared', { playerId: nextCommand.playerId });
-            }
-        }, 30000);
-    } else {
-        commandQueue.delete(nextCommand.playerId);
-        log('INFO', 'Single-target command delivered', {
-            playerId: nextCommand.playerId,
-            targetJobId: nextCommand.targetJobId
-        });
+        if (matchesTarget) {
+            commandQueue.delete(key);
+            log('INFO', 'Single-target command delivered', {
+                playerId: nextCommand.playerId,
+                targetJobId: nextCommand.targetJobId,
+                serverJobId
+            });
+            return res.json({
+                status: 'success',
+                command: nextCommand.command,
+                playerId: nextCommand.playerId,
+                targetJobId: nextCommand.targetJobId
+            });
+        }
     }
 
-    res.json({
+    return res.json({
         status: 'success',
-        command: nextCommand.command,
-        playerId: nextCommand.playerId,
-        targetJobId: nextCommand.targetJobId
+        command: 'return "No pending commands"'
     });
 });
 
@@ -282,7 +298,6 @@ app.post('/data-response', requireAuth, (req, res) => {
 
         log('INFO', 'Response received', { playerId, success });
 
-        // ---- MULTI-SERVER SERVER LIST COLLECTION WITH PAGINATION ----
         if (playerId.startsWith('ServerList_')) {
             const isFirstResponse = !serverResponses.has(playerId);
 
@@ -326,14 +341,11 @@ app.post('/data-response', requireAuth, (req, res) => {
 
                     const totalServers = uniqueServers.length;
                     const totalPlayers = uniqueServers.reduce((sum, s) => sum + s.count, 0);
-                    const pageSize = 6;
-                    const pageCount = Math.max(1, Math.ceil(totalServers / pageSize));
+                    const pageCount = Math.max(1, Math.ceil(totalServers / PAGE_SIZE));
 
-                    const embeds = [];
-
-                    for (let pageIndex = 0; pageIndex < pageCount; pageIndex++) {
-                        const start = pageIndex * pageSize;
-                        const end = Math.min(start + pageSize, totalServers);
+                    function buildServerListEmbed(pageIndex) {
+                        const start = pageIndex * PAGE_SIZE;
+                        const end = Math.min(start + PAGE_SIZE, totalServers);
                         const pageServers = uniqueServers.slice(start, end);
 
                         const embed = new EmbedBuilder()
@@ -346,7 +358,7 @@ app.post('/data-response', requireAuth, (req, res) => {
 
                         pageServers.forEach((server, i) => {
                             const displayIndex = start + i + 1;
-                            const playerList = server.players.length > 0
+                            const playerList = server.players?.length > 0
                                 ? server.players.slice(0, 10).join(', ') + (server.players.length > 10 ? '...' : '')
                                 : 'No players';
 
@@ -357,10 +369,46 @@ app.post('/data-response', requireAuth, (req, res) => {
                             });
                         });
 
-                        embeds.push(embed);
+                        return embed;
                     }
 
-                    request.channel.send({ embeds }).catch(err =>
+                    function buildPageButtons(pageIndex) {
+                        const rows = [];
+                        const maxButtonsPerRow = 5;
+                        const buttons = [];
+
+                        for (let p = 0; p < pageCount; p++) {
+                            buttons.push(
+                                new ButtonBuilder()
+                                    .setCustomId(`serverlist_${p}`)
+                                    .setLabel(String(p + 1))
+                                    .setStyle(p === pageIndex ? ButtonStyle.Primary : ButtonStyle.Secondary)
+                            );
+                        }
+
+                        for (let i = 0; i < buttons.length; i += maxButtonsPerRow) {
+                            const row = new ActionRowBuilder().addComponents(buttons.slice(i, i + maxButtonsPerRow));
+                            rows.push(row);
+                        }
+
+                        return rows;
+                    }
+
+                    const embed = buildServerListEmbed(0);
+                    const components = pageCount > 1 ? buildPageButtons(0) : [];
+
+                    request.channel.send({
+                        embeds: [embed],
+                        components
+                    }).then((msg) => {
+                        if (pageCount > 1) {
+                            serverListPages.set(msg.id, {
+                                buildEmbed: buildServerListEmbed,
+                                buildButtons: buildPageButtons,
+                                expiresAt: Date.now() + 600000
+                            });
+                        }
+                    }).catch(err =>
                         log('ERROR', 'Failed to send server list', { error: err.message })
                     );
 
@@ -384,7 +432,6 @@ app.post('/data-response', requireAuth, (req, res) => {
 
             return res.json({ status: 'success' });
         }
-        // ---- END SERVER LIST BRANCH ----
 
         if (playerId.startsWith('SearchPlayer_')) {
             const result = data?.result;
@@ -493,7 +540,6 @@ app.delete('/clear-queue', requireAuth, (req, res) => {
     res.json({ status: 'success', message: `Cleared ${queueSize} queued commands` });
 });
 
-// Roblox command queue helper
 async function queueRobloxCommand(channel, command, playerId, targetJobId = '*') {
     if (!CONFIG.SERVER_URL) {
         throw new Error('ROBLOX_SERVER_URL is not configured; cannot queue Roblox command.');
@@ -527,7 +573,6 @@ async function queueRobloxCommand(channel, command, playerId, targetJobId = '*')
     }
 }
 
-// Discord bot events
 discordClient.on('ready', () => {
     log('INFO', `Bot logged in as ${discordClient.user.tag}`);
     log('INFO', `Serving ${discordClient.guilds.cache.size} guild(s)`);
@@ -536,6 +581,32 @@ discordClient.on('ready', () => {
 
 discordClient.on('error', err => log('ERROR', 'Discord client error', { error: err.message }));
 discordClient.on('warn', warning => log('WARN', 'Discord client warning', { warning }));
+
+discordClient.on('interactionCreate', async (interaction) => {
+    if (!interaction.isButton()) return;
+    if (!interaction.customId.startsWith('serverlist_')) return;
+
+    const pageIndex = parseInt(interaction.customId.replace('serverlist_', ''), 10);
+    const pageData = serverListPages.get(interaction.message.id);
+
+    if (!pageData) {
+        await interaction.reply({ content: 'This server list has expired.', ephemeral: true }).catch(() => {});
+        return;
+    }
+
+    if (Date.now() > pageData.expiresAt) {
+        serverListPages.delete(interaction.message.id);
+        await interaction.reply({ content: 'This server list has expired.', ephemeral: true }).catch(() => {});
+        return;
+    }
+
+    const embed = pageData.buildEmbed(pageIndex);
+    const components = pageData.buildButtons(pageIndex);
+
+    await interaction.update({ embeds: [embed], components }).catch(err =>
+        log('ERROR', 'Failed to update server list page', { error: err.message })
+    );
+});
 
 discordClient.on('messageCreate', async message => {
     if (message.author.bot) return;
@@ -681,7 +752,6 @@ discordClient.on('messageCreate', async message => {
     }
 });
 
-// Global error handlers
 process.on('unhandledRejection', (reason, promise) => {
     log('ERROR', 'Unhandled Rejection', { reason: String(reason) });
 });
@@ -691,13 +761,11 @@ process.on('uncaughtException', (error) => {
     process.exit(1);
 });
 
-// Start HTTP server
 log('INFO', 'Starting Express HTTP server...');
 app.listen(CONFIG.PORT, () => {
     log('INFO', `Express server listening on port ${CONFIG.PORT}`);
 });
 
-// Start Discord bot
 (async () => {
     try {
         log('INFO', 'Logging into Discord...');
